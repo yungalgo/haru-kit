@@ -1,0 +1,48 @@
+# Local-only plans, internal docs, and upstream reference checkouts (never committed)
+/docs/
+/plans/
+/vendor/
+
+# Secrets & environments
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# Python build & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Model weights, shards, & audio artifacts
+*.safetensors
+*.pt
+*.pth
+*.bin
+*.onnx
+*.gguf
+*.wav
+*.flac
+*.opus
+*.mp3
+*.m4a
+!tests/data/*.flac
+!haru_kit/assets/*.flac
+out/
+checkpoints/
+shards/
+
+# OS & editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+node_modules/

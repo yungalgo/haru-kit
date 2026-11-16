@@ -1,0 +1,12 @@
+include CHANGELOG.md
+include SKILL.md
+graft scripts
+graft tests/data
+graft haru_kit/apps/strings
+recursive-include haru_kit/apps/web/src *.ts *.tsx
+prune haru_kit/apps/mac/build
+prune haru_kit/apps/mac/.build
+prune haru_kit/apps/mac/Tests
+prune haru_kit/apps/web/node_modules
+prune haru_kit/apps/web/dist
+global-exclude __pycache__ *.py[cod] .DS_Store
