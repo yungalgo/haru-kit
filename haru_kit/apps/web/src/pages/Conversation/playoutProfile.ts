@@ -2,7 +2,7 @@
 // --network-profile). Defaults = the "internet" profile.
 export type PlayoutProfile = {
   // WebSocket playout: queued audio before playback starts, and the lowest queue the
-  // catch-up shortens back to.
+  // Catch-up shortens back to.
   playout_start_ms: number;
   catchup_target_ms: number;
   // 20 ms Opus frames per Ogg page sent from the mic.

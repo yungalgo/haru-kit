@@ -9,7 +9,7 @@ function asSamples(mili) {
 
 // Shorten ``x`` by ``rate`` (0..0.25) without changing its pitch (WSOLA): Hann windows of ``win`` samples at 50 % overlap, each taken near its nominal
 // (faster) input position where it best continues the previous one (cross-correlation
-// within +-``tol``). Starts with the input's first samples and crossfades into its last
+// Within +-``tol``). Starts with the input's first samples and crossfades into its last
 // ``win / 2`` so consecutive chunks still join seamlessly.
 function wsolaCompress(x, rate, win, tol) {
   const n = x.length;
@@ -34,9 +34,9 @@ function wsolaCompress(x, rate, win, tol) {
   let prev = 0;
   for (let k = 1; k * hop + hop <= outLen; k++) {
     const nominal = Math.round(k * hop * speed);
-    const natural = prev + hop;  // what would follow the previous window unchanged
+    const natural = prev + hop;  // What would follow the previous window unchanged
     const hi = Math.min(n - win, nominal + tol);
-    const lo = Math.min(Math.max(0, nominal - tol), hi);  // near the end: the last window that fits
+    const lo = Math.min(Math.max(0, nominal - tol), hi);  // Near the end: the last window that fits
     let best = nominal >= lo && nominal <= hi ? nominal : lo;
     if (natural + win <= n) {
       let bestCorr = -Infinity;
@@ -75,27 +75,27 @@ class PlayoutProcessor extends AudioWorkletProcessor {
 
     // Buffer length definitions
     // The model emits 133.3 ms frames (3200 samples at 24 kHz), so every threshold must
-    // fit at least one whole frame or the drop logic fires on every packet.
+    // Fit at least one whole frame or the drop logic fires on every packet.
     let frameSize = asSamples(400 / 3);
-    // initialBufferSamples: we wait to have at least that many samples before starting to play
+    // InitialBufferSamples: we wait to have at least that many samples before starting to play
     this.initialBufferSamples = 2 * frameSize;
-    // once we have enough samples, we further wait that long before starting to play.
+    // Once we have enough samples, we further wait that long before starting to play.
     // This allows to have buffer lengths that are not a multiple of frameSize.
     this.partialBufferSamples = asSamples(20);
     // If the buffer length goes over that many, we will drop the oldest packets until
-    // we reach back initialBufferSamples + partialBufferSamples.
+    // We reach back initialBufferSamples + partialBufferSamples.
     this.maxBufferSamples = frameSize;
-    // increments
+    // Increments
     this.partialBufferIncrement = asSamples(20);
     this.maxPartialWithIncrements = asSamples(200);
     this.maxBufferSamplesIncrement = frameSize;
     this.maxMaxBufferWithIncrements = asSamples(400);
     // Catch-up: after a stall the restart margin and the burst that
-    // follows leave more audio queued than an undisturbed stream keeps (one frame plus 100 ms,
-    // measured at its lowest, just before a frame arrives; +20 ms missed ~3 % of the audio
-    // on a jittery uplink, as the steady queue left no margin for the late frames). While the
-    // lowest queue of the last ~0.7 s is more than CATCHUP_DEADBAND above that, each
-    // arriving chunk is shortened by WSOLA: up to 10 %, 20 % while the excess is above
+    // Follows leave more audio queued than an undisturbed stream keeps (one frame plus 100 ms,
+    // Measured at its lowest, just before a frame arrives; +20 ms missed ~3 % of the audio
+    // On a jittery uplink, as the steady queue left no margin for the late frames). While the
+    // Lowest queue of the last ~0.7 s is more than CATCHUP_DEADBAND above that, each
+    // Arriving chunk is shortened by WSOLA: up to 10 %, 20 % while the excess is above
     // 150 ms. The removed time counts as played stream time, like a drop.
     this.catchupTarget = frameSize + asSamples(100);
     this.catchupDeadband = asSamples(20);
@@ -160,8 +160,8 @@ class PlayoutProcessor extends AudioWorkletProcessor {
   }
 
   // Also posted every ~20 ms from process(): the main thread takes the latency as mic time
-  // minus the played stream time, both extrapolated to the moment it reads them (a value
-  // computed only when a model frame arrives is phase-locked to the frames).
+  // Minus the played stream time, both extrapolated to the moment it reads them (a value
+  // Computed only when a model frame arrives is phase-locked to the frames).
   postStats() {
     this.statsLeft = this.statsEverySamples;
     this.port.postMessage({

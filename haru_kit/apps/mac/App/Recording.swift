@@ -1,13 +1,13 @@
 // Records a conversation as it was heard and exports it:
-// the audio (you on the left, the model on the right) and a 1080x1080 video laid
-// out like the conversation screen: the orbs and waveform lanes, the transcript below.
+// The audio (you on the left, the model on the right) and a 1080x1080 video laid
+// Out like the conversation screen: the orbs and waveform lanes, the transcript below.
 
 import AVFoundation
 import SwiftUI
 
 /// Collects both voices on the audio threads and moves them to 24 kHz 16-bit
-/// storage on a background queue. Your voice starts at the first input
-/// sample's ADC time; the model's is placed by the DAC time of what was played.
+/// Storage on a background queue. Your voice starts at the first input
+/// Sample's ADC time; the model's is placed by the DAC time of what was played.
 final class ConversationRecorder {
     private final class Pending {
         let capacity = 96_000  // 2 s at 48 kHz; drained every 100 ms
@@ -225,8 +225,8 @@ struct Recording {
         let release = Float(exp(-1 / Double(fps) / 0.08))
         var audioWritten = 0
         // The writer interleaves the tracks: keep the audio a second ahead of the
-        // video, and mark it finished once complete, or the writer stops taking
-        // video while it waits for audio.
+        // Video, and mark it finished once complete, or the writer stops taking
+        // Video while it waits for audio.
         func feedAudio(until limit: Int) {
             guard let format, audioWritten < frames else { return }
             while audioWritten < min(frames, limit), audio.isReadyForMoreMediaData,
@@ -306,7 +306,7 @@ struct Recording {
 }
 
 /// One video frame, laid out like the conversation screen: the name on top,
-/// your lane and the model's, the transcript below (the last seconds dark).
+/// Your lane and the model's, the transcript below (the last seconds dark).
 struct VideoFrame: View {
     let time: Double
     let userName: String
@@ -347,7 +347,7 @@ struct VideoFrame: View {
 }
 
 /// The video's transcript: wrapped into lines from the start and shown from
-/// the top; once the box is full, a new line scrolls the whole top line away.
+/// The top; once the box is full, a new line scrolls the whole top line away.
 final class TranscriptLines {
     static let width: CGFloat = 530, height: CGFloat = 300, fontSize: CGFloat = 26, lineSpacing: CGFloat = 8
     private let font = NSFont.systemFont(ofSize: fontSize, weight: .medium)
@@ -355,8 +355,8 @@ final class TranscriptLines {
         let line = NSLayoutManager().defaultLineHeight(for: font)
         return max(1, Int((Self.height + Self.lineSpacing) / (line + Self.lineSpacing)))
     }()
-    private var heard = 0    // pieces taken so far
-    private var shown = ""   // text from the first visible line on
+    private var heard = 0    // Pieces taken so far
+    private var shown = ""   // Text from the first visible line on
     private var rendered = ""
 
     /// The visible lines, joined by newlines, for all pieces heard so far.
@@ -374,7 +374,7 @@ final class TranscriptLines {
     }
 
     /// `shown` split where its last `recent` characters begin (newlines,
-    /// which `update` adds between lines, aside).
+    /// Which `update` adds between lines, aside).
     static func split(_ shown: String, recent: String) -> (older: String, recent: String) {
         var left = recent.filter { !$0.isNewline }.count
         var index = shown.endIndex
@@ -386,7 +386,7 @@ final class TranscriptLines {
     }
 
     /// Lines as laid out a little narrower than the box, so that SwiftUI never
-    /// wraps one of them again.
+    /// Wraps one of them again.
     private func wrap(_ text: String) -> [String] {
         let storage = NSTextStorage(string: text, attributes: [.font: font])
         let layout = NSLayoutManager()

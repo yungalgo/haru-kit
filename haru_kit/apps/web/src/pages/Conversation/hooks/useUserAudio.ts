@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getPlayoutProfile } from "../playoutProfile";
 import Recorder from "opus-recorder";
 import encoderPath from "opus-recorder/dist/encoderWorker.min.js?url";
@@ -30,13 +30,25 @@ export const useUserAudio = ({
   onRecordingStart = noop,
   onRecordingStop = noop,
 }: useUserAudioArgs) => {
-  const { recordingMerger, audioContext, micDuration, micClock } = useMediaContext();
+  const { recordingMerger, audioContext, micDuration, micClock, muted } = useMediaContext();
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<UserMediaStatuses>(
     UserMediaStatuses.IDLE,
   );
 
   const recorder = useRef<any>(null);
+  // The stream for the waveform and the recording (the Opus recorder opens its own).
+  const stream = useRef<MediaStream | null>(null);
+  // The call ended: whatever is still opening must close at once.
+  const stopWanted = useRef(false);
+
+  // Muted = silence to the model (its clock keeps running) and in the recording.
+  const mutedRef = useRef(muted);
+  mutedRef.current = muted;
+  useEffect(() => {
+    recorder.current?.setRecordingGain(muted ? 0 : 1);
+    stream.current?.getAudioTracks().forEach(track => track.enabled = !muted);
+  }, [muted]);
 
   const getMediaStream = useCallback(async () => {
     setStatus(UserMediaStatuses.WAITING_FOR_PERMISSION);
@@ -54,8 +66,14 @@ export const useUserAudio = ({
   }, [constraints, setStatus]);
 
   const startRecordingUser = useCallback(async () => {
+    stopWanted.current = false;
     const mediaStream = await getMediaStream();
-    if (mediaStream) {
+    if (mediaStream && stopWanted.current) {
+      // The call ended while the browser opened the microphone.
+      mediaStream.getTracks().forEach(track => track.stop());
+    } else if (mediaStream) {
+      stream.current = mediaStream;
+      mediaStream.getAudioTracks().forEach(track => track.enabled = !mutedRef.current);
       const settings: any = mediaStream.getAudioTracks()[0]?.getSettings() ?? {};
       micClock.current = { pageAt: 0, captureLatency: Number(settings.latency) || 0 };
       const analyser = audioContext.current.createAnalyser();
@@ -66,16 +84,17 @@ export const useUserAudio = ({
       // For buffer length: 960 = 24000 / 12.5 / 2
       // The /2 is a bit optional, but won't hurt for recording the mic.
       // Note that bufferLength actually has 0 impact for mono audio, only
-      // the frameSize and maxFramesPerPage seems to have any.
+      // The frameSize and maxFramesPerPage seems to have any.
       const recorderOptions = {
-        mediaTrackConstraints: constraints,
+        // The recorder opens its own stream with these track constraints (the chosen microphone).
+        mediaTrackConstraints: constraints.audio,
         encoderPath,
         bufferLength: Math.round(960 * audioContext.current.sampleRate / 24000),
         encoderFrameSize: 20,
         encoderSampleRate: 24000,
         maxFramesPerPage: getPlayoutProfile().mic_frames_per_page,
         numberOfChannels: 1,
-        recordingGain: 1,
+        recordingGain: mutedRef.current ? 0 : 1,
         resampleQuality: 3,
         encoderComplexity: 0,
         encoderApplication: 2049,
@@ -93,19 +112,25 @@ export const useUserAudio = ({
       recorder.current.onstart = () => {
         setStatus(UserMediaStatuses.RECORDING);
         onRecordingStart();
+        if (stopWanted.current) {
+          recorder.current?.stop();
+        }
       };
       recorder.current.onstop = () => {
         setStatus(UserMediaStatuses.STOPPED);
         source.disconnect();
+        mediaStream.getTracks().forEach(track => track.stop());
         onRecordingStop();
 
         recorder.current = null;
       };
 
-      if (recorder.current) {
-        recorder.current.start();
-
-      }
+      // The recorder opens its own stream: it can fail on its own.
+      recorder.current.start().catch((e: unknown) => {
+        console.error(e);
+        setError(e instanceof Error ? e.name : "Error");
+        setStatus(UserMediaStatuses.ERROR);
+      });
 
       return {
         analyser,
@@ -120,11 +145,14 @@ export const useUserAudio = ({
     };
   }, [setStatus, onDataChunk, onRecordingStart, onRecordingStop]);
 
+  // Stops the Opus recorder (it closes its own stream) and the stream of the waveform,
+  // Also when the recorder or the stream is still opening.
   const stopRecording = useCallback(() => {
     setStatus(UserMediaStatuses.STOPPING);
-    if (recorder.current) {
-      recorder.current.stop();
-    }
+    stopWanted.current = true;
+    recorder.current?.stop();
+    stream.current?.getTracks().forEach(track => track.stop());
+    stream.current = null;
   }, [setStatus]);
 
   return {

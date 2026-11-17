@@ -35,10 +35,10 @@ export const MODEL: Track = 1;
 // Loudness per lane, 20 bins a second, on the page clock (`now()`).
 export class WaveHistory {
   static binSeconds = 0.05;
-  static capacity = 1200;  // one minute
+  static capacity = 1200;  // One minute
 
   private peaks = [new Float32Array(WaveHistory.capacity), new Float32Array(WaveHistory.capacity)];
-  private last: (number | null)[] = [null, null];  // newest bin written per lane
+  private last: (number | null)[] = [null, null];  // Newest bin written per lane
 
   private static slot(bin: number) {
     const c = WaveHistory.capacity;
@@ -95,7 +95,7 @@ const rgba = (hex: string, alpha: number) => {
 };
 
 // A soft, always-moving blob in the box (x, y, w, h): at rest it breathes, ripples
-// and turns on its own; with the voice it swells, wobbles harder and turns faster.
+// And turns on its own; with the voice it swells, wobbles harder and turns faster.
 export const drawBlob = (
   ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number,
   raw: number, t: number, state: BlobState, colors: string[],
@@ -172,7 +172,7 @@ const barHeight = (peak: number) => {
 };
 
 // One lane in the box (x, y, w, h): a bar per bin, mirrored around the middle; silence
-// as dots. The right edge is `t`, so the bars slide left as time passes.
+// As dots. The right edge is `t`, so the bars slide left as time passes.
 export const drawLane = (
   ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number,
   history: WaveHistory, track: Track, t: number, color: string,

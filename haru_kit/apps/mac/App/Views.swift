@@ -1,7 +1,8 @@
+// Modified from higurashi-ai/Haru (Apache-2.0) for haru-kit.
 // Screens in Haru's style: white pages, soft grey rounded cards, capsule
-// buttons and one red-orange accent, the coral of the model's lane. The orbs and waveform lanes (Waveform.swift)
-// draw at screen rate inside TimelineView, so they never re-render the rest
-// of the window.
+// Buttons and one red-orange accent, the coral of the model's lane. The orbs and waveform lanes (Waveform.swift)
+// Draw at screen rate inside TimelineView, so they never re-render the rest
+// Of the window.
 
 import SwiftUI
 
@@ -15,19 +16,19 @@ extension Color {
 }
 
 enum Theme {
-    static let ink = Color(hex: 0x1d1d1f)      // text
-    static let muted = Color(hex: 0x6e6e73)    // secondary text
-    static let line = Color(hex: 0xd2d2d7)     // field borders, silence dots
-    static let paper = Color.white             // page
-    static let card = Color(hex: 0xf5f5f7)     // grouped sections, lanes
-    static let fill = Color(hex: 0xe8e8ed)     // secondary buttons
-    static let accent = Color(hex: 0xe04a2f)   // the model lane's coral, dark enough for white text on it
+    static let ink = Color(hex: 0x1d1d1f)      // Text
+    static let muted = Color(hex: 0x6e6e73)    // Secondary text
+    static let line = Color(hex: 0xd2d2d7)     // Field borders, silence dots
+    static let paper = Color.white             // Page
+    static let card = Color(hex: 0xf5f5f7)     // Grouped sections, lanes
+    static let fill = Color(hex: 0xe8e8ed)     // Secondary buttons
+    static let accent = Color(hex: 0xe04a2f)   // The model lane's coral, dark enough for white text on it
     static let success = accent
     static let warning = Color(hex: 0xb64400)
 }
 
 /// Capsule buttons: red-orange and filled for the main action (`accent`) or a
-/// chosen option (`selected`), grey otherwise.
+/// Chosen option (`selected`), grey otherwise.
 struct HaruButtonStyle: ButtonStyle {
     var selected = false
     var accent = false
@@ -70,12 +71,17 @@ struct Card<Content: View>: View {
 
 struct FieldBox<Content: View>: View {
     let label: String
+    var help = ""
     @ViewBuilder let content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
             content
+            if !help.isEmpty {
+                Text(help).font(.system(size: 11)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }
@@ -94,11 +100,12 @@ private struct FieldChrome: ViewModifier {
 
 struct HaruTextField: View {
     let label: String
+    var help = ""
     @Binding var text: String
     @FocusState private var focused: Bool
 
     var body: some View {
-        FieldBox(label: label) {
+        FieldBox(label: label, help: help) {
             TextField("", text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
@@ -112,12 +119,13 @@ struct HaruTextField: View {
 
 struct HaruTextEditor: View {
     let label: String
+    var help = ""
     @Binding var text: String
     var height: CGFloat = 80
     @FocusState private var focused: Bool
 
     var body: some View {
-        FieldBox(label: label) {
+        FieldBox(label: label, help: help) {
             TextEditor(text: $text)
                 .font(.system(size: 14))
                 .scrollContentBackground(.hidden)
@@ -135,7 +143,7 @@ struct HaruSelect: View {
 
     var body: some View {
         // The whole field opens the menu: a plain button-style menu draws this
-        // label as is, where a borderless one only answers clicks on its text.
+        // Label as is, where a borderless one only answers clicks on its text.
         Menu {
             ForEach(options, id: \.0) { tag, label in Button(label) { selection = tag } }
         } label: {
@@ -198,7 +206,7 @@ struct Masthead: View {
             VStack(spacing: 6) {
                 HStack(spacing: 8) {
                     // The orb fills about the middle half of its canvas: lay it
-                    // out at that width so the pair is centred as it looks.
+                    // Out at that width so the pair is centred as it looks.
                     IdleOrb().frame(width: 84, height: 84).padding(.horizontal, -20)
                     Text("Haru").font(.system(size: 52, weight: .semibold)).tracking(-1)
                 }
@@ -206,6 +214,31 @@ struct Masthead: View {
                     .foregroundStyle(Theme.muted)
             }
         }
+    }
+}
+
+/// The globe menu: the one language of the app's text and of the model (the card, the voice, the library).
+struct LanguageMenu: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        Menu {
+            Picker(t("app.language"), selection: Binding(get: { model.language }, set: { model.selectLanguage($0) })) {
+                ForEach(UILanguage.supported, id: \.self) { code in Text(UILanguage.names[code] ?? code).tag(code) }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Image(systemName: "globe").font(.system(size: 15)).foregroundStyle(Theme.muted)
+                .frame(width: 30, height: 30).contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(model.phase == .starting)
+        .help(t("app.languageHelp"))
+        .accessibilityLabel(t("app.language"))
     }
 }
 
@@ -240,10 +273,21 @@ struct LaunchView: View {
 
     var body: some View {
         VStack(spacing: 24) {
-            Masthead()
+            Masthead().frame(maxWidth: .infinity).overlay(alignment: .topTrailing) { LanguageMenu() }
             HStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                Text(model.status).foregroundStyle(Theme.muted)
+                if model.serverFailed {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.warning)
+                    Text(model.status).foregroundStyle(Theme.warning)
+                    Button(t("action.retry")) { model.retryLaunch() }
+                        .buttonStyle(HaruButtonStyle(accent: true))
+                } else {
+                    if let percent = model.downloadPercent, percent < 100 {
+                        ProgressView(value: Double(percent) / 100).frame(width: 160)
+                    } else {
+                        ProgressView().controlSize(.small)
+                    }
+                    Text(model.status).foregroundStyle(Theme.muted)
+                }
             }
             ScrollViewReader { proxy in
                 ScrollView {
@@ -275,17 +319,22 @@ struct SetupView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 Masthead().frame(maxWidth: .infinity).padding(.top, 12).padding(.bottom, 8)
+                    .overlay(alignment: .topTrailing) { LanguageMenu() }
                 startRow.padding(.bottom, 8)
+                if model.microphoneDenied { MicrophoneDenied() }
                 if (model.lastReport?.frames ?? 0) > 0 || model.lastRecording != nil { lastConversation }
                 cardSection
-                referenceSection
+                VoiceSection()
                 settingsSection
+                Text(t("footer.limit", ["minutes": AppModel.timeLimitMinutes]))
+                    .font(.system(size: 12)).foregroundStyle(Theme.muted).frame(maxWidth: .infinity)
             }
             .padding(.horizontal, 32)
             .padding(.vertical, 28)
             .frame(maxWidth: 720)
             .frame(maxWidth: .infinity)
         }
+        .sheet(isPresented: $model.browsing) { RegistrySheet().environmentObject(model) }
     }
 
     private var lastConversation: some View {
@@ -301,145 +350,127 @@ struct SetupView: View {
         }
     }
 
-    /// The last conversation's audio and video, nothing else.
+    /// The last conversation's audio, text and video.
     private var saveRow: some View {
-        HStack(spacing: 10) {
-            Text(t("save.last")).font(.system(size: 13)).foregroundStyle(Theme.muted)
-            Button { model.saveAudio() } label: { Label(t("save.audio"), systemImage: "waveform") }
-                .buttonStyle(HaruButtonStyle())
-            Button { model.saveVideo() } label: { Label(t("save.video"), systemImage: "film") }
-                .buttonStyle(HaruButtonStyle())
-                .disabled(model.exportProgress != nil)
-            if let p = model.exportProgress {
-                ProgressView(value: p).frame(width: 120)
-                Text(t("save.exporting", ["percent": Int(p * 100)]))
-                    .font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.muted)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text(t("save.last")).font(.system(size: 13)).foregroundStyle(Theme.muted)
+                Button { model.saveAudio() } label: { Label(t("save.audio"), systemImage: "waveform") }
+                    .buttonStyle(HaruButtonStyle())
+                Button { model.saveText() } label: { Label(t("save.text"), systemImage: "doc.text") }
+                    .buttonStyle(HaruButtonStyle())
+                Button { model.saveVideo() } label: { Label(t("save.video"), systemImage: "film") }
+                    .buttonStyle(HaruButtonStyle())
+                    .disabled(model.exportProgress != nil)
+                if let p = model.exportProgress {
+                    ProgressView(value: p).frame(width: 120)
+                    Text(t("save.exporting", ["percent": Int(p * 100)]))
+                        .font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.muted)
+                }
+                Spacer()
             }
-            Spacer()
+            Text(t("save.audioHelp")).font(.system(size: 12)).foregroundStyle(Theme.muted)
         }
     }
 
     private var cardSection: some View {
         Card {
-            HStack(alignment: .top) {
-                SectionTitle(title: t("character.title"), note: t("character.note"))
-                Spacer()
-                HStack(spacing: 6) {
-                    ForEach(model.presets) { preset in
-                        Button(preset.label) { model.applyPreset(preset) }
-                            .buttonStyle(HaruButtonStyle(selected: model.card == CardFields(preset.card)))
-                    }
+            SectionTitle(title: t("character.title"), note: t("character.note"))
+            LibraryGrid()
+            if model.missingVersion {
+                MissingVersion()
+            } else {
+                if model.writingVersion {
+                    Label(t("character.newVersionNote", ["language": model.languageLabel(model.language)]),
+                          systemImage: "square.and.pencil")
+                        .font(.system(size: 12)).foregroundStyle(Theme.warning)
                 }
+                CharacterMeta()
+                Label(t("character.matchLanguageNote"), systemImage: "info.circle")
+                    .font(.system(size: 12)).foregroundStyle(Theme.muted)
+                CardFieldsEditor(card: $model.draft.card)
+                RenderedCard(text: model.renderedCard, maxChars: AppModel.promptMaxChars)
             }
-            FieldBox(label: t("field.language")) {
-                HaruSelect(options: model.languages.map { ($0.code, $0.label) },
-                            selection: Binding(get: { model.language }, set: { model.selectLanguage($0) }))
-            }
-            // Labels from your side; the model's prompt keeps the
-            // template's own headers (its name as "your name", yours as "the other's").
-            HStack(alignment: .top, spacing: 14) {
-                HaruTextField(label: t("field.modelName"), text: $model.card.name)
-                HaruTextField(label: t("field.yourName"), text: $model.card.otherName)
-            }
-            HStack(alignment: .top, spacing: 14) {
-                FieldBox(label: t("field.gender")) {
-                    HaruSelect(options: [("", t("option.unspecified")), ("female", t("option.female")), ("male", t("option.male"))],
-                                selection: $model.card.gender)
-                }
-                FieldBox(label: t("field.backchannel")) {
-                    HaruSelect(options: [("", t("option.unspecified")), ("low", t("backchannel.low")), ("mid", t("backchannel.mid")), ("high", t("backchannel.high"))],
-                                selection: $model.card.backchannel)
-                }
-            }
-            HaruTextEditor(label: t("field.persona"), text: $model.card.persona, height: 110)
-            HaruTextEditor(label: t("field.relationship"), text: $model.card.relationship, height: 64)
-            HaruTextEditor(label: t("field.situation"), text: $model.card.situation, height: 64)
+            CharacterActions()
         }
     }
 
-    private var referenceSection: some View {
-        Card {
-            SectionTitle(title: t("voice.title"), note: t("voice.note", ["min": 3, "max": 3]))
-            HStack(spacing: 6) {
-                ForEach(model.referenceSources) { source in
-                    Button(source.label) { model.referenceSource = source }
-                        .buttonStyle(HaruButtonStyle(selected: model.referenceSource == source))
-                }
-                Spacer()
-                Button { model.playReference() } label: { Label(t("voice.preview"), systemImage: "play.fill") }
-                    .buttonStyle(HaruButtonStyle())
-                    .disabled(model.referenceURL == nil)
-            }
-            HStack(spacing: 10) {
-                switch model.referenceSource {
-                case .preset:
-                    Text(t("voice.defaultOf", ["language": model.languages.first { $0.code == model.language }?.label ?? ""]))
-                        .foregroundStyle(Theme.muted)
-                case .file:
-                    Text(model.referenceFile?.lastPathComponent ?? t("voice.noFile"))
-                        .foregroundStyle(Theme.muted)
-                    Spacer()
-                    Button(t("voice.chooseFile")) { model.chooseFile() }.buttonStyle(HaruButtonStyle())
-                case .recording:
-                    if model.isRecording {
-                        Circle().fill(Color(hex: 0xff3b30)).frame(width: 9, height: 9)
-                    }
-                    Text(model.recordingURL == nil ? t("voice.notRecorded")
-                         : t("voice.seconds", ["seconds": String(format: "%.1f", model.recordingSeconds)]))
-                        .monospacedDigit().foregroundStyle(Theme.muted)
-                    Spacer()
-                    Button(model.isRecording ? t("voice.stopRecording") : t("voice.startRecording")) { model.toggleRecording() }
-                        .buttonStyle(HaruButtonStyle(selected: model.isRecording))
-                }
-            }
-            .font(.system(size: 13))
-            .frame(minHeight: 28)
-        }
-    }
-
+    /// The settings in the order of both front ends: devices, device advice, CFG
+    /// Scale, margin, precision.
     private var settingsSection: some View {
         Card {
             SectionTitle(title: t("settings.title"), note: "")
             HStack(alignment: .top, spacing: 14) {
                 FieldBox(label: t("settings.microphone")) {
-                    HaruSelect(options: model.inputDevices.map { ($0, $0) }, selection: $model.inputDevice)
+                    HaruSelect(options: deviceOptions(model.inputDevices, model.inputChoice, model.inputDevice),
+                               selection: Binding(get: { model.inputChoice }, set: { model.chooseInput($0) }))
                 }
                 FieldBox(label: t("settings.output")) {
-                    HaruSelect(options: model.outputDevices.map { ($0, $0) }, selection: $model.outputDevice)
+                    HaruSelect(options: deviceOptions(model.outputDevices, model.outputChoice, model.outputDevice),
+                               selection: Binding(get: { model.outputChoice }, set: { model.chooseOutput($0) }))
                 }
             }
             deviceAdvice
-            Button(t("settings.rescan")) { model.refreshDevices() }
-                .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(Theme.accent)
             // Each control sits between what its two ends do.
-            HStack(spacing: 10) {
-                settingLabel("CFG scale")
-                hint(t("settings.cfgLow"))
-                Slider(value: $model.cfgScale, in: 1.0...2.0, step: 0.05).frame(width: 200)
-                hint(t("settings.cfgHigh"))
-                Text(String(format: "%.2f", model.cfgScale)).monospacedDigit().padding(.leading, 6)
-            }
-            HStack(spacing: 10) {
-                settingLabel(t("settings.margin"))
-                hint(t("settings.faster"))
-                Button { model.marginMs = max(5, model.marginMs - 5) } label: { Image(systemName: "minus") }
-                    .buttonStyle(HaruButtonStyle())
-                Text("\(Int(model.marginMs)) ms").monospacedDigit().frame(width: 52)
-                Button { model.marginMs = min(40, model.marginMs + 5) } label: { Image(systemName: "plus") }
-                    .buttonStyle(HaruButtonStyle())
-                hint(t("settings.steadier"))
-            }
-            HStack(spacing: 10) {
-                settingLabel(t("settings.precision"))
-                hint(t("settings.accurate"))
-                ForEach([("bf16", "BF16"), ("int8", "int8")], id: \.0) { value, label in
-                    Button(label) { model.setPrecision(value) }
-                        .buttonStyle(HaruButtonStyle(selected: (model.precision.isEmpty ? "bf16" : model.precision) == value))
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 10) {
+                    settingLabel("CFG scale")
+                    hint(t("settings.cfgLow"))
+                    Slider(value: $model.cfgScale, in: 1.0...2.0, step: 0.05).frame(width: 200)
+                    hint(t("settings.cfgHigh"))
+                    Text(String(format: "%.2f", model.cfgScale)).monospacedDigit().padding(.leading, 6)
                 }
-                hint(t("settings.faster"))
+                settingHelp(t("settings.cfgHelp"))
             }
-            .disabled(model.isRecording || model.exportProgress != nil)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 10) {
+                    settingLabel(t("settings.margin"))
+                    hint(t("settings.faster"))
+                    Button { model.marginMs = max(5, model.marginMs - 5) } label: { Image(systemName: "minus") }
+                        .buttonStyle(HaruButtonStyle())
+                    Text("\(Int(model.marginMs)) ms").monospacedDigit().frame(width: 52)
+                    Button { model.marginMs = min(40, model.marginMs + 5) } label: { Image(systemName: "plus") }
+                        .buttonStyle(HaruButtonStyle())
+                    hint(t("settings.steadier"))
+                }
+                settingHelp(t("settings.marginHelp"))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 10) {
+                    settingLabel(t("settings.precision"))
+                    hint(t("settings.accurate"))
+                    ForEach([("bf16", "BF16"), ("int8", "int8")], id: \.0) { value, label in
+                        Button(label) { model.setPrecision(value) }
+                            .buttonStyle(HaruButtonStyle(selected: (model.precision.isEmpty ? "int8" : model.precision) == value))
+                    }
+                    hint(t("settings.faster"))
+                }
+                .disabled(model.isRecording || model.exportProgress != nil || !model.ownsServer)
+                settingHelp(model.ownsServer ? t("settings.precisionHelp") : t("settings.precisionForeign"))
+                if model.precisionTooSlow {
+                    HStack(spacing: 10) {
+                        Label(t("settings.precisionSlow", ["ms": Int(model.stepMs)]), systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 12)).foregroundStyle(Theme.warning)
+                        if model.ownsServer {
+                            Button(t("settings.useInt8")) { model.setPrecision("int8") }
+                                .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.accent)
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    /// "Automatic" with the device it uses now, then each device.
+    private func deviceOptions(_ names: [String], _ choice: String, _ device: String) -> [(String, String)] {
+        let automatic = choice.isEmpty && !device.isEmpty ? "\(t("settings.automatic")) (\(device))" : t("settings.automatic")
+        return [("", automatic)] + names.map { ($0, $0) }
+    }
+
+    private func settingHelp(_ text: String) -> some View {
+        Text(text).font(.system(size: 12)).foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.leading, 110)
     }
 
     private func settingLabel(_ text: String) -> some View {
@@ -523,15 +554,28 @@ struct ConversationView: View {
                 Button(t("action.end")) { model.stopConversation() }
                     .buttonStyle(HaruButtonStyle())
                     .keyboardShortcut(.cancelAction)
-                Circle().fill(Theme.success).frame(width: 8, height: 8)
-                Text(t("status.live")).font(.system(size: 13)).foregroundStyle(Theme.muted)
+                Button { model.muted.toggle() } label: {
+                    Label(model.muted ? t("live.unmute") : t("live.mute"),
+                          systemImage: model.muted ? "mic.slash.fill" : "mic.fill")
+                }
+                .buttonStyle(HaruButtonStyle(selected: model.muted))
+                Circle().fill(model.muted ? Theme.warning : Theme.success).frame(width: 8, height: 8)
+                Text(model.muted ? t("live.muted") : t("status.live")).font(.system(size: 13))
+                    .foregroundStyle(model.muted ? Theme.warning : Theme.muted)
+                if let started = model.talkStarted {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let left = max(0, AppModel.timeLimitMinutes * 60 - Int(context.date.timeIntervalSince(started)))
+                        Text(t("live.timeLeft", ["time": String(format: "%02d:%02d", left / 60, left % 60)]))
+                            .font(.system(size: 13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    }
+                }
                 Spacer()
                 Masthead(compact: true)
             }
             stats
             WaveLanes(levels: model.levels, waves: model.waves,
-                      userName: model.card.otherName.isEmpty ? t("speaker.you") : model.card.otherName,
-                      modelName: model.card.name.isEmpty ? t("speaker.model") : model.card.name)
+                      userName: model.draft.card.otherName.isEmpty ? t("speaker.you") : model.draft.card.otherName,
+                      modelName: model.draft.card.name.isEmpty ? t("speaker.model") : model.draft.card.name)
             Subtitles(waves: model.waves)
                 .padding(.leading, 126)
                 .frame(maxHeight: .infinity)
@@ -551,5 +595,26 @@ struct ConversationView: View {
         }
         .padding(18)
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(Theme.card))
+    }
+}
+
+/// The user refused the microphone: what to do, and a way to System Settings.
+struct MicrophoneDenied: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "mic.slash.fill").font(.system(size: 18)).foregroundStyle(Theme.warning)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(t("error.microphoneDenied")).font(.system(size: 14, weight: .semibold))
+                Text(t("error.microphoneFixMac")).font(.system(size: 13)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(t("action.openSettings")) { model.openMicrophoneSettings() }
+                    .buttonStyle(HaruButtonStyle(accent: true))
+            }
+            Spacer()
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.warning.opacity(0.08)))
     }
 }

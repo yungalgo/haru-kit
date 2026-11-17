@@ -10,8 +10,8 @@ type ServerAudioStatsProps = {
 
 // The "Latency" readout (and what it is made of) goes to the server log too, every
 // REPORT_MS and when the conversation ends. Only while connected: after a disconnect
-// the player keeps running and would count its silence as missed audio, so the
-// readout freezes at the last connected values.
+// The player keeps running and would count its silence as missed audio, so the
+// Readout freezes at the last connected values.
 const REPORT_MS = 10000;
 
 // The last conversation's latency (seconds), shown on the setup page after it ends.
@@ -22,7 +22,7 @@ const storeLastLatency = (value: LastLatency) => {
   try {
     sessionStorage.setItem(LAST_LATENCY_KEY, JSON.stringify(value));
   } catch {
-    // ignore
+    // Ignore
   }
 };
 
@@ -50,10 +50,10 @@ export const ServerAudioStats = ({ getAudioStats, sessionId }: ServerAudioStatsP
   const movingAverageSum = useRef<number>(0.);
   const movingAverageCount = useRef<number>(0.);
   const movingBeta = 0.85;
-  const samples = useRef<number[]>([]);  // displayed latency, one per tick once known
+  const samples = useRef<number[]>([]);  // Displayed latency, one per tick once known
 
   let convertMinSecs = (total_secs: number) => {
-    // convert secs to the format mm:ss.cc
+    // Convert secs to the format mm:ss.cc
     let mins = (Math.floor(total_secs / 60)).toString();
     let secs = (Math.floor(total_secs) % 60).toString();
     let cents = (Math.floor(100 * (total_secs - Math.floor(total_secs)))).toString();
@@ -114,7 +114,7 @@ export const ServerAudioStats = ({ getAudioStats, sessionId }: ServerAudioStatsP
       try {
         navigator.sendBeacon("api/client_stats", new Blob([body], { type: "text/plain" }));
       } catch {
-        // ignore
+        // Ignore
       }
     };
     const reporter = setInterval(() => report(false), REPORT_MS);

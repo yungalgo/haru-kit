@@ -1,7 +1,7 @@
 // Command-line client for the model server
 // (python -m haru_mlx.native). Uses the server's
-// default card and the voice given with --voice; on exit it prints the reply
-// latency and where it went.
+// Default card and the voice given with --voice; on exit it prints the reply
+// Latency and where it went.
 
 import Foundation
 
@@ -92,7 +92,7 @@ FileHandle.standardError.write("""
     """.data(using: .utf8)!)
 signal(SIGINT) { _ in done.signal() }
 _ = done.wait(timeout: options.seconds.map { .now() + $0 } ?? .distantFuture)
-let r = audio.report()  // before stopping: once the input stops, no more frames come
+let r = audio.report()  // Before stopping: once the input stops, no more frames come
 audio.stop()
 conn.close()
 

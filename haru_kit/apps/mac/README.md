@@ -1,4 +1,6 @@
-# Haru for macOS
+# Haru for macOS (haru-kit)
+
+Modified from [`higurashi-ai/Haru`](https://github.com/higurashi-ai/Haru) `haru_mlx/swift` (Apache-2.0; see `../UPSTREAM.md`).
 
 `Haru.app` lets you talk with Haru on your Mac: it listens and speaks at the
 same time, with backchannels and interruptions. The app does the audio with
@@ -7,45 +9,28 @@ starts by itself.
 
 ## Requirements
 
-- A Mac with Apple silicon, macOS 13 or later. The model is about 10 GB on
+- A Mac with Apple silicon, macOS 13 or later. The model is about 10.5 GB on
   disk; 16 GB of memory is the practical minimum.
 - The Command Line Tools (for `swiftc`; Xcode itself is not needed).
-- Python 3.10 or later.
 - Wired headphones and a wired or USB microphone (see [Audio devices](#audio-devices)).
 
 ## Setup
 
-Run these from the `haru_mlx` directory (the parent of this one).
-
-**1. Install the Command Line Tools** (skip if `xcode-select -p` prints a path):
+Normally `haru-kit` builds and installs `~/Applications/Haru.app` automatically:
 
 ```bash
-xcode-select --install
+haru-kit start --on mac --app
 ```
 
-**2. Create the Python environment** in `.venv` (the build looks for it there):
+To build manually from this folder (`haru_kit/apps/mac`) against an environment that has `haru-speech-mlx` installed:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
-
-**3. Build the app:**
-
-```bash
-cd swift
-./build_app.sh
-```
-
-This writes `build/Haru.app` and the command-line client `.build/haru-client`.
-To use another Python, build with `PYTHON=/path/to/python ./build_app.sh`.
-
-**4. Open it:**
-
-```bash
+xcode-select --install    # skip if `xcode-select -p` prints a path
+PYTHON="$HOME/Library/Application Support/haru-kit/envs/mac/bin/python" ./build_app.sh
 open build/Haru.app
 ```
+
+This writes `build/Haru.app` and (unless `SKIP_CLI=1`) the command-line client `.build/haru-client`.
 
 Allow microphone access when asked. The app starts the model server
 (`python -m haru_mlx.native`); the first launch downloads the model
@@ -56,38 +41,88 @@ so a copy moved to another Mac cannot start the server.
 
 ## Using the app
 
-The app is in English at first and follows the language you choose for the
-character (the nine languages of the model); it remembers the choice.
+The globe menu at the top of the window sets the language. It is the language
+of the app's text and the language that Haru speaks: the prompt headings, the
+default voice, the library filter and the character titles follow it, and the
+selected character changes to its version in this language. When the character
+has no version in this language, the app tells you to write one or to choose
+another character. At the first start, the language is the first language in
+the system's list of preferred languages that the model speaks (one of its nine
+languages), else English. The app remembers the choice. The conversation screen
+has no globe menu: the language cannot change while Haru speaks.
 
-1. **Character**: pick an example or write the card: the
-   model's name, your name, the model's gender and backchannels, its persona,
-   your relationship and the situation.
-2. **Voice**: an audio file or a recording of 3 seconds to 3 minutes of
-   one speaker. Haru ships without voice clips; bring your own, or install a
-   default voice (see the [package README](../README.md#talk-to-it)).
-3. **Settings**: the microphone and the output, the guidance scale, the
-   margin (playback slack for a late model step) and the precision: BF16
-   (the default, as published) or int8 (smaller and faster; switching reloads
-   the model).
-4. Click **Start conversation** and talk. A few seconds after your last edit
+1. **Character**: choose a character in the library, or make a new one. On
+   the first start, the app adds every character of the shared list (the
+   haru-characters registry) to your library; when the registry does not
+   answer, the library stays empty and the app tries again at the next start.
+   The editor shows the picture (click it to choose or replace it), the name
+   in the library, the short description and the author, then the 7 card
+   fields of the version in the current language, each with a short help text,
+   and below them the text that the model reads. You can change, save, undo,
+   duplicate and delete every character, and write a version for another
+   language. A character must have a picture: Save stays off until it has one.
+   The app asks before it discards unsaved changes. The tiles show a
+   character's version and the date of its last save, if it has them.
+   **Browse characters** opens the shared list: "Add to my library" downloads
+   one, checks its size and SHA-256, and adds it with its voices; "Update"
+   replaces it when the list has another version. The registry is
+   `HARU_KIT_REGISTRY` (at launch), else the `registryURL` setting that
+   haru-kit writes, else `https://yungalgo.github.io/haru-characters/`; an
+   empty address hides the button and the first-start step.
+2. **Voice**: choose a voice in the voice library (play it first), or add your
+   own: record it with the microphone of Settings (read the text on the
+   screen; at least 3 s, it stops by itself at 3 minutes; 10 to 30 s is
+   enough) or upload a file (WAV, FLAC, MP3, M4A/AAC, Ogg, Opus, AIFF,
+   CAF). The preview plays what the model gets: the
+   audio with the silence at the start and the end removed, at most its last
+   180 s. The app stores every added voice in one format: this audio as a WAV
+   file (24 kHz, mono, 16-bit), also a voice from a `.haru` file. You can delete every voice. When the voice
+   speaks another language than the text, the app warns (Start is not blocked).
+3. **Import and export**: "Export the character" writes a `.haru` file (the
+   character with all its versions, its picture and its voices); "Import a
+   .haru file" reads one made by this app or the web app.
+4. **Settings**: the microphone and the output (Automatic follows the devices
+   you plug in or remove; a device you choose stays while it is there), the
+   CFG scale, the margin (playback slack for a late model step), the precision
+   (int8 by default: smaller and faster; or BF16, the published precision;
+   switching reloads the model). The app keeps all settings between launches.
+5. Click **Start conversation** and talk. A few seconds after your last edit
    of the card or the voice, the server reads them into the model in the
    background, and **Ready** appears next to the button; the conversation then
    starts as soon as you click. The screen shows your voice and the model's as two
-   waveform lanes on one clock, the model's words as they are heard, and the
-   reply latency.
-5. Click **End conversation**. You can then save the conversation's audio
-   (WAV: you on the left, the model on the right, as heard) or a video of the
-   screen's lanes and transcript (MP4).
+   waveform lanes on one clock, the model's words as they are heard, the
+   reply latency and the time left (60 minutes at most). **Mute** sends silence
+   in place of your microphone.
+6. Click **End conversation**. You can then save the conversation's audio
+   (WAV: you on the left, the model on the right, as heard), the model's text
+   (TXT) or a video of the screen's lanes and transcript (MP4). The app keeps
+   the last conversation until the next one starts. If you did not save it,
+   the app asks before **Start conversation** and before you quit: **Save…**
+   stops so that you can save it, **Don't save** continues.
 
-Quitting the app stops the server. The server's output and each
-conversation's latency are logged to `~/Library/Logs/Haru/app.log`.
+Your characters, voices and pictures are in
+`~/Library/Application Support/haru-kit/library`. Quitting the app stops
+the server it started. The server's output and each conversation's latency
+are logged to `~/Library/Logs/Haru/app.log`.
 
 ## Audio devices
 
 Use wired headphones and a wired or USB microphone: the devices' own latency
 adds to the reply latency. Bluetooth headphones add 100 ms and more; the built-in microphone and speakers
-of a MacBook add tens of milliseconds of processing. The app picks a wired or
-USB microphone first and warns when the chosen devices add a lot of latency.
+of a MacBook add tens of milliseconds of processing. "Automatic" picks a wired or
+USB microphone first, and the app warns when the chosen devices add a lot of latency.
+
+## Tests
+
+```bash
+./Tests/run.sh       # logic tests: device rule, silence trim, ZIP, library and .haru import, saved WAV,
+                     # the registry client against TEST_REGISTRY (default http://localhost:8970/; skipped
+                     # when it does not answer; TEST_REGISTRY_UPDATE: a copy with a newer version), and
+                     # clips of 11 audio types stored as WAV against upstream's trim (needs ffmpeg and
+                     # PYTHON with haru_mlx)
+./Tests/record.sh    # records 2 s from "BlackHole 2ch" (or the device you name) with the voice recorder
+./Tests/screens.sh   # renders the screens in several states to /tmp/haru-screens (no model needed)
+```
 
 ## Troubleshooting
 

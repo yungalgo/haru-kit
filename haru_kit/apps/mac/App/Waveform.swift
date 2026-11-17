@@ -1,27 +1,28 @@
+// Modified from higurashi-ai/Haru (Apache-2.0) for haru-kit.
 // The conversation as two waveform lanes on one clock: your voice and the
-// model's, newest at the right, each with a living orb on the left, and the
-// model's words below as they are heard.
+// Model's, newest at the right, each with a living orb on the left, and the
+// Model's words below as they are heard.
 
 import SwiftUI
 
 // MARK: - History
 
 /// Loudness per lane on the host clock, 20 bins a second, filled on the audio
-/// threads at the time each sample is heard: your voice at its ADC time, the
-/// model's at its DAC time. The model's text is kept with the time it is heard.
+/// Threads at the time each sample is heard: your voice at its ADC time, the
+/// Model's at its DAC time. The model's text is kept with the time it is heard.
 final class WaveHistory {
     enum Track: Int { case user, model }
 
     static let binSeconds = 0.05
-    private static let capacity = 1200  // one minute
+    private static let capacity = 1200  // One minute
 
     private var lock = os_unfair_lock()
     // Fixed buffers, so the audio threads never allocate.
     private let peaks = [UnsafeMutablePointer<Float>.allocate(capacity: capacity),
                          UnsafeMutablePointer<Float>.allocate(capacity: capacity)]
-    private var last = [Int.min, Int.min]  // newest bin written per lane
+    private var last = [Int.min, Int.min]  // Newest bin written per lane
     private var texts: [(time: Double, text: String)] = []
-    private var settled = 0, settledText = ""  // texts older than the recent window
+    private var settled = 0, settledText = ""  // Texts older than the recent window
 
     init() { reset() }
 
@@ -86,7 +87,7 @@ final class WaveHistory {
     }
 
     /// The model's text heard by `time`: what is older than `recent` seconds,
-    /// and the rest.
+    /// And the rest.
     func heard(at time: Double, recent: Double) -> (older: String, recent: String) {
         os_unfair_lock_lock(&lock)
         defer { os_unfair_lock_unlock(&lock) }
@@ -123,7 +124,7 @@ final class BlobState {
 }
 
 /// A soft, always-moving blob: at rest it breathes, ripples and turns on its
-/// own; with the voice it swells, wobbles harder and turns faster.
+/// Own; with the voice it swells, wobbles harder and turns faster.
 enum BlobPainter {
     static func draw(_ ctx: GraphicsContext, size: CGSize, level raw: Double, time t: Double,
                      state: BlobState, colors: [Color]) {
@@ -138,8 +139,8 @@ enum BlobPainter {
         let w = min(size.width, size.height)
         let c = CGPoint(x: size.width / 2, y: size.height / 2)
         // Nearly a circle: the motion is mostly breathing and turning, the
-        // wobble slight. Breathing fades out as the voice takes over. The outer
-        // layer fits at either end: 0.22 * 1.06 * 1.2 * (1 + 1.2 * 0.025) and
+        // Wobble slight. Breathing fades out as the voice takes over. The outer
+        // Layer fits at either end: 0.22 * 1.06 * 1.2 * (1 + 1.2 * 0.025) and
         // 0.22 * 1.4 * 1.2 * (1 + 1.2 * 0.07) < 0.5.
         let breath = 1 + 0.06 * sin(t * 1.6) * (1 - l)
         let r = w * 0.22 * (1 + 0.4 * l) * breath
@@ -224,7 +225,7 @@ struct LaneRow: View {
     let colors: [Color]
     let barColor: Color
     let peaks: (Int, Int) -> [Float]
-    var date: Date? = nil  // the live screen frame: Canvas redraws only when what it reads changes
+    var date: Date? = nil  // The live screen frame: Canvas redraws only when what it reads changes
 
     var body: some View {
         HStack(spacing: 16) {
@@ -258,7 +259,7 @@ struct WaveLanes: View {
 
     var body: some View {
         TimelineView(.animation) { timeline in
-            let t = now()  // the host clock the bins use
+            let t = now()  // The host clock the bins use
             let level = levels.current()
             VStack(spacing: 14) {
                 LaneRow(name: userName, level: Double(level.user), time: t, blob: userBlob, colors: Palette.user,
@@ -285,28 +286,57 @@ struct Subtitles: View {
     }
 }
 
+/// Follows the newest text only while the reader is at the end; after scrolling
+/// Up, the text stays put and a button goes back to the newest text.
 private struct SubtitleText: View, Equatable {
     let older: String
     let recent: String
+    @State private var atEnd = true
+
+    static func == (a: Self, b: Self) -> Bool { a.older == b.older && a.recent == b.recent }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                Group {
-                    if older.isEmpty && recent.isEmpty {
-                        Text("…").foregroundColor(Theme.muted)
-                    } else {
-                        Text(older).foregroundColor(Theme.muted) + Text(recent).foregroundColor(Theme.ink)
+        GeometryReader { outer in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Group {
+                        if older.isEmpty && recent.isEmpty {
+                            Text("…").foregroundColor(Theme.muted)
+                        } else {
+                            Text(older).foregroundColor(Theme.muted) + Text(recent).foregroundColor(Theme.ink)
+                        }
+                    }
+                    .font(.system(size: 22, weight: .medium))
+                    .lineSpacing(7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 4)
+                    Color.clear.frame(height: 1).id("end")
+                        .background(GeometryReader { g in
+                            Color.clear.preference(key: SubtitleEnd.self, value: g.frame(in: .named("subtitles")).maxY)
+                        })
+                }
+                .coordinateSpace(name: "subtitles")
+                // At the end: the end of the text within a line of the bottom.
+                .onPreferenceChange(SubtitleEnd.self) { maxY in atEnd = maxY <= outer.size.height + 60 }
+                .onChange(of: older.count + recent.count) { _ in
+                    if atEnd { proxy.scrollTo("end", anchor: .bottom) }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if !atEnd {
+                        Button { proxy.scrollTo("end", anchor: .bottom) } label: {
+                            Label(t("live.jumpToLatest"), systemImage: "arrow.down")
+                        }
+                        .buttonStyle(HaruButtonStyle(accent: true))
+                        .padding(8)
                     }
                 }
-                .font(.system(size: 22, weight: .medium))
-                .lineSpacing(7)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .textSelection(.enabled)
-                .padding(.horizontal, 4)
-                Color.clear.frame(height: 1).id("end")
             }
-            .onChange(of: older.count + recent.count) { _ in proxy.scrollTo("end", anchor: .bottom) }
         }
     }
+}
+
+private struct SubtitleEnd: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

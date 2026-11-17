@@ -1,9 +1,21 @@
+// Modified from higurashi-ai/Haru (Apache-2.0) for haru-kit.
 // Starts the Python model server when none is listening, and stops it with the app.
 
 import Foundation
 
+/// The percent of a model file download in a server log line (a Hugging Face
+/// Progress bar such as "model.safetensors:  37%|███▋  | 3.9G/10.5G"); nil for
+/// Other lines and for the bar that counts files.
+func downloadProgress(_ line: String) -> Int? {
+    guard !line.hasPrefix("Fetching"), let bar = line.range(of: #"(\d{1,3})%\|"#, options: .regularExpression) else {
+        return nil
+    }
+    return Int(line[bar].dropLast(2)).map { min($0, 100) }
+}
+
 final class ServerLauncher {
     private var process: Process?
+    private var pipe: Pipe?
     private var ready = false
 
     /// Connect to a running server, or start one and connect once it is ready.
@@ -20,33 +32,31 @@ final class ServerLauncher {
               onLog: onLog, onConnected: onConnected, onFailure: onFailure)
     }
 
-    /// Stop whichever server is running (this app's or one started elsewhere)
-    /// and start one with these arguments.
+    /// This app started the running server (only then can it restart it).
+    var ownsServer: Bool { process?.isRunning == true }
+
+    /// Stop the server this app started, wait until it has exited, and start
+    /// One with these arguments. Servers started elsewhere are never stopped.
     func restart(socket: String, python: String, arguments: [String],
                  onLog: @escaping (String) -> Void,
                  onConnected: @escaping (Connection) -> Void,
                  onFailure: @escaping (String) -> Void) {
-        stop()
+        let old = process
+        pipe?.fileHandleForReading.readabilityHandler = nil
+        pipe = nil
+        process = nil  // Its exit is not a start failure
         DispatchQueue.global().async {
-            let pattern = "haru_mlx.native"
-            Self.run("/usr/bin/pkill", ["-f", pattern])
-            for _ in 0..<100 where Self.run("/usr/bin/pgrep", ["-f", pattern]) == 0 { usleep(100_000) }
+            if let old, old.isRunning {
+                old.terminate()
+                for _ in 0..<100 where old.isRunning { usleep(100_000) }
+                if old.isRunning { kill(old.processIdentifier, SIGKILL) }
+                old.waitUntilExit()
+            }
             DispatchQueue.main.async {
                 self.start(socket: socket, python: python, arguments: arguments,
                            onLog: onLog, onConnected: onConnected, onFailure: onFailure)
             }
         }
-    }
-
-    @discardableResult private static func run(_ tool: String, _ args: [String]) -> Int32 {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: tool)
-        p.arguments = args
-        p.standardOutput = FileHandle.nullDevice
-        p.standardError = FileHandle.nullDevice
-        guard (try? p.run()) != nil else { return -1 }
-        p.waitUntilExit()
-        return p.terminationStatus
     }
 
     private func start(socket: String, python: String, arguments: [String],
@@ -61,16 +71,21 @@ final class ServerLauncher {
         env["PYTHONUNBUFFERED"] = "1"
         p.environment = env
         let pipe = Pipe()
+        self.pipe = pipe
         p.standardOutput = pipe
         p.standardError = pipe
-        var pending = ""
+        var pending = Data()
         pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            pending += text
-            while let newline = pending.firstIndex(where: { $0 == "\n" || $0 == "\r" }) {
-                let line = String(pending[..<newline]).trimmingCharacters(in: .whitespaces)
-                pending = String(pending[pending.index(after: newline)...])
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+                return
+            }
+            pending.append(data)
+            while let newline = pending.firstIndex(where: { $0 == 0x0A || $0 == 0x0D }) {
+                let lineBytes = pending[..<newline]
+                pending.removeSubrange(...newline)
+                let line = String(decoding: lineBytes, as: UTF8.self).trimmingCharacters(in: .whitespaces)
                 guard !line.isEmpty else { continue }
                 DispatchQueue.main.async { onLog(line) }
                 if line.contains("[native] ready on"), let self, !self.ready {
@@ -85,6 +100,7 @@ final class ServerLauncher {
             }
         }
         p.terminationHandler = { [weak self] proc in
+            pipe.fileHandleForReading.readabilityHandler = nil
             guard let self, !self.ready, self.process === proc else { return }
             DispatchQueue.main.async {
                 onFailure(t("error.exited", ["code": proc.terminationStatus]))
@@ -95,12 +111,15 @@ final class ServerLauncher {
             process = p
             onLog("$ \(python) -m haru_mlx.native \(arguments.joined(separator: " "))")
         } catch {
+            pipe.fileHandleForReading.readabilityHandler = nil
             onFailure(t("error.launch", ["error": error.localizedDescription]) + "\nPython: \(python)")
         }
     }
 
     /// Stop the server if this app started it.
     func stop() {
+        pipe?.fileHandleForReading.readabilityHandler = nil
+        pipe = nil
         if let p = process, p.isRunning { p.terminate() }
         process = nil
     }

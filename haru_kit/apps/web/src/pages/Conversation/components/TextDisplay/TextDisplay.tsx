@@ -5,6 +5,10 @@ import { FONT, Theme, VIDEO_LAYOUT, VIDEO_SCALE } from "../../../../haru/painter
 type TextDisplayProps = {
   containerRef: React.RefObject<HTMLDivElement>;
   copyCanvasRef?: React.RefObject<HTMLCanvasElement>;
+  // Scroll to the newest words (false while the user reads older text).
+  follow: boolean;
+  // The model's words so far (for the saved text).
+  onText?: (text: string[]) => void;
 };
 
 // The last seconds of the model's words are dark, the rest grey.
@@ -28,7 +32,7 @@ const segmentText = (s: string): string[] =>
   wordSegmenter ? Array.from(wordSegmenter.segment(s), seg => seg.segment) : Array.from(s);
 
 // Draws the model's words like the on-page subtitles (tokens from `recentFrom` on dark,
-// the rest grey), wrapped to the area and scrolled to the newest line.
+// The rest grey), wrapped to the area and scrolled to the newest line.
 export const drawVideoText = (
   ctx: CanvasRenderingContext2D,
   text: string[],
@@ -117,8 +121,11 @@ export const drawVideoText = (
 };
 
 // The model's words as they arrive: the last few seconds dark, the rest grey.
-export const TextDisplay: FC<TextDisplayProps> = ({ containerRef, copyCanvasRef }) => {
+export const TextDisplay: FC<TextDisplayProps> = ({ containerRef, copyCanvasRef, follow, onText }) => {
   const { text } = useServerText();
+  useEffect(() => {
+    onText?.(text);
+  }, [text, onText]);
   // Arrival time (performance.now()) of each token.
   const times = useRef<number[]>([]);
   const [, setTick] = useState(0);
@@ -145,9 +152,12 @@ export const TextDisplay: FC<TextDisplayProps> = ({ containerRef, copyCanvasRef 
     return () => window.clearInterval(id);
   }, [hasRecent]);
 
+  // Instant, so that the scroll events of the container see the end at once.
   useEffect(() => {
-    containerRef.current?.scroll({ top: containerRef.current.scrollHeight, behavior: "smooth" });
-  }, [text]);
+    if (follow) {
+      containerRef.current?.scroll({ top: containerRef.current.scrollHeight });
+    }
+  }, [text, follow]);
 
   useEffect(() => {
     const ctx = copyCanvasRef?.current?.getContext("2d");

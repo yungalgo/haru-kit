@@ -9,9 +9,14 @@ type MediaContextType = {
   worklet: MutableRefObject<AudioWorkletNode>;
   micDuration: MutableRefObject<number>;
   // When micDuration last advanced (performance.now(), ms) and the microphone's input
-  // latency (MediaTrackSettings.latency, s; 0 when the browser does not report it).
+  // Latency (MediaTrackSettings.latency, s; 0 when the browser does not report it).
   micClock: MutableRefObject<{ pageAt: number; captureLatency: number }>;
   actualAudioPlayed: MutableRefObject<number>;
+  // The microphone chosen in Settings, and the output ("" = the system default).
+  micConstraints: MediaStreamConstraints;
+  outputId: string;
+  // The user muted the microphone.
+  muted: boolean;
 };
 
 // Recordings put the user on the left channel and the model on the right.

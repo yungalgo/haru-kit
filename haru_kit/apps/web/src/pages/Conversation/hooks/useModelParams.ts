@@ -15,7 +15,7 @@ export const useModelParams = (params?: Partial<ModelParamsValues>) => {
 
   const resetParams = useCallback(() => setCfgScaleBase(DEFAULT_CFG_SCALE), []);
   const setCfgScale = useCallback((value: number) => {
-    if (value <= 2.0 && value >= 1.0) {  // the server clamps the same
+    if (value <= 2.0 && value >= 1.0) {  // The server clamps the same
       setCfgScaleBase(value);
     }
   }, []);

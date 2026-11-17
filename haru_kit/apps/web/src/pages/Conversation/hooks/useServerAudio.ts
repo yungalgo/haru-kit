@@ -5,6 +5,7 @@ import { MODEL_CHANNEL, useMediaContext } from "../MediaContext";
 import { DecoderWorker } from "../../../decoder/decoderWorker";
 import { RtcSocket } from "../rtcSocket";
 import { getPlayoutProfile } from "../playoutProfile";
+import { setSink } from "../../Queue/settings";
 
 export type AudioStats = {
   playedAudioDuration: number;
@@ -36,17 +37,17 @@ type useServerAudioArgs = {
 type WorkletStats = {
   totalAudioPlayed: number;
   actualAudioPlayed: number;
-  timeInStream?: number;  // played stream time (drops and catch-up count as played)
+  timeInStream?: number;  // Played stream time (drops and catch-up count as played)
   playing?: boolean;
   at?: number;  // AudioContext time of the post
   minDelay: number;
   maxDelay: number;
-  compressedAudio?: number;  // catch-up: seconds removed by the worklet's WSOLA
+  compressedAudio?: number;  // Catch-up: seconds removed by the worklet's WSOLA
 };
 
 export const useServerAudio = ({setGetAudioStats}: useServerAudioArgs) => {
   const { socket  } = useSocketContext();
-  const {startRecording, stopRecording, audioContext, worklet, micDuration, micClock, actualAudioPlayed, recordingMerger } =
+  const {startRecording, stopRecording, audioContext, worklet, micDuration, micClock, actualAudioPlayed, recordingMerger, outputId } =
     useMediaContext();
   const analyser = useRef(audioContext.current.createAnalyser());
   worklet.current.connect(analyser.current);
@@ -81,7 +82,7 @@ export const useServerAudio = ({setGetAudioStats}: useServerAudioArgs) => {
   worklet.current.port.onmessage = onWorkletMessage;
 
   // WebRTC: the browser's own jitter buffer plays the model track; its stats stand in
-  // for the worklet's (concealed samples are the "missed" audio).
+  // For the worklet's (concealed samples are the "missed" audio).
   const rtcStats = useRef<AudioStats | null>(null);
 
   const outputLatency = () => {
@@ -90,8 +91,8 @@ export const useServerAudio = ({setGetAudioStats}: useServerAudioArgs) => {
   };
 
   // WebSocket latency: mic time minus played stream time, both extrapolated to now (the
-  // encoder advances micDuration once per Ogg page, the worklet posts every ~20 ms), plus
-  // the audio devices. 0 until model audio has played.
+  // Encoder advances micDuration once per Ogg page, the worklet posts every ~20 ms), plus
+  // The audio devices. 0 until model audio has played.
   const webSocketDelay = () => {
     const w = workletStats.current;
     if (!w.timeInStream) return 0;
@@ -147,7 +148,7 @@ export const useServerAudio = ({setGetAudioStats}: useServerAudioArgs) => {
       const dataArray = new Uint8Array(e.data);
       const message = decodeMessage(dataArray);
       // The recording starts when the conversation does (handshake, or the first
-      // model audio), not at connect: that would capture the setup as silence.
+      // Model audio), not at connect: that would capture the setup as silence.
       if (message.type === "handshake" || message.type === "audio") {
         startRecording();
       }
@@ -168,7 +169,7 @@ export const useServerAudio = ({setGetAudioStats}: useServerAudioArgs) => {
 
   useEffect(() => {
     // Reset when the next connection starts, not in the cleanup: the stats panel's final
-    // report at disconnect still reads the WebRTC stats.
+    // Report at disconnect still reads the WebRTC stats.
     rtcStats.current = null;
     const currentSocket = socket as unknown;
     if (!(currentSocket instanceof RtcSocket)) {
@@ -180,11 +181,12 @@ export const useServerAudio = ({setGetAudioStats}: useServerAudioArgs) => {
     const onRemoteStream = () => {
       if (!rtc.remoteStream) return;
       // Played by an <audio> element (needed for Chrome to pull WebRTC audio, and the
-      // echo canceller sees it); WebAudio taps the same stream for visualizer + recording.
+      // Echo canceller sees it); WebAudio taps the same stream for visualizer + recording.
       element = new Audio();
       element.autoplay = true;
       element.srcObject = rtc.remoteStream;
-      element.play().catch(error => console.error("[webrtc] playback", error));
+      const player = element;
+      setSink(player, outputId).then(() => player.play()).catch(error => console.error("[webrtc] playback", error));
       source = audioContext.current.createMediaStreamSource(rtc.remoteStream);
       source.connect(analyser.current);
       source.connect(recordingMerger.current, 0, MODEL_CHANNEL);
@@ -193,7 +195,7 @@ export const useServerAudio = ({setGetAudioStats}: useServerAudioArgs) => {
     const timer = window.setInterval(async () => {
       const stats = await rtc.getAudioStats(Number((audioContext.current as any).outputLatency) || 0);
       if (!stats) {
-        rtcStats.current = null;  // fell back to the WebSocket: worklet stats again
+        rtcStats.current = null;  // Fell back to the WebSocket: worklet stats again
         return;
       }
       actualAudioPlayed.current = stats.receivedSeconds - stats.concealedSeconds;
@@ -256,7 +258,7 @@ export const useServerAudio = ({setGetAudioStats}: useServerAudioArgs) => {
     decoderWorker.current.onmessage = onWorkerMessage;
     // 960 = 24000 / 12.5 / 2
     // The /2 is a bit optional, but won't hurt for recording the mic, and for the
-    // the decoding it might help getting some decoded audio out asap.
+    // The decoding it might help getting some decoded audio out asap.
     decoderWorker.current.postMessage({
       command: "init",
       bufferLength: 960 * audioContext.current.sampleRate / 24000,

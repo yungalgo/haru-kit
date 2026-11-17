@@ -1,5 +1,6 @@
+// Modified from higurashi-ai/Haru (Apache-2.0) for haru-kit.
 // Audio I/O for the full-duplex client: Core Audio HAL output units with small
-// device buffers, the playback schedule, and the reply-latency measurement.
+// Device buffers, the playback schedule, and the reply-latency measurement.
 
 import AudioToolbox
 import CoreAudio
@@ -36,7 +37,11 @@ func property<T>(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector,
         mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
     var result = value
     var size = UInt32(MemoryLayout<T>.size)
-    AudioObjectGetPropertyData(id, &address, 0, nil, &size, &result)
+    withUnsafeMutableBytes(of: &result) { raw in
+        if let base = raw.baseAddress {
+            _ = AudioObjectGetPropertyData(id, &address, 0, nil, &size, base)
+        }
+    }
     return result
 }
 
@@ -137,9 +142,9 @@ private func setBufferFrames(_ id: AudioDeviceID, _ frames: UInt32) -> UInt32 {
 // MARK: - Catch-up
 
 /// Shorten `x` by `rate` (0..0.25) without changing its pitch (WSOLA): Hann
-/// windows at 50 % overlap, each taken near its nominal (faster) input position
-/// where it best continues the previous one. The first half window and the
-/// last half window keep the input's own samples, so frames still join.
+/// Windows at 50 % overlap, each taken near its nominal (faster) input position
+/// Where it best continues the previous one. The first half window and the
+/// Last half window keep the input's own samples, so frames still join.
 func wsolaCompress(_ x: [Float], rate: Double, win: Int = 960, tol: Int = 240) -> [Float] {
     let n = x.count
     let outLen = Int((Double(n) * (1 - rate)).rounded())
@@ -158,7 +163,7 @@ func wsolaCompress(_ x: [Float], rate: Double, win: Int = 960, tol: Int = 240) -
     var k = 1
     while k * hop + hop <= outLen {
         let nominal = Int((Double(k * hop) * speed).rounded())
-        let natural = prev + hop  // what would follow the previous window unchanged
+        let natural = prev + hop  // What would follow the previous window unchanged
         let hi = min(n - win, nominal + tol)
         let lo = min(max(0, nominal - tol), hi)
         var best = (lo...hi).contains(nominal) ? nominal : lo
@@ -181,7 +186,7 @@ func wsolaCompress(_ x: [Float], rate: Double, win: Int = 960, tol: Int = 240) -
         k += 1
     }
     var y = (0..<outLen).map { wsum[$0] > 1e-3 ? out[$0] / wsum[$0] : 0 }
-    for i in 0..<hop {  // crossfade into the input's tail
+    for i in 0..<hop {  // Crossfade into the input's tail
         let r = Float(i + 1) / Float(hop)
         y[outLen - hop + i] = y[outLen - hop + i] * (1 - r) + x[n - hop + i] * r
     }
@@ -191,11 +196,11 @@ func wsolaCompress(_ x: [Float], rate: Double, win: Int = 960, tol: Int = 240) -
 // MARK: - Playback
 
 /// Model frame 0 starts playing at `startAt` (the first input sample's ADC
-/// time plus the time model frame 1 needs), so frame 1 is ready when frame 0
-/// ends whatever order the devices started in. After an underrun, `margin` of
-/// silence restores the slack. Catch-up: while more than `margin` + 5 ms is
-/// queued when a frame arrives (after an underrun, or frames that came late
-/// together), the frame is shortened by up to 10 % (20 % above 150 ms) with
+/// Time plus the time model frame 1 needs), so frame 1 is ready when frame 0
+/// Ends whatever order the devices started in. After an underrun, `margin` of
+/// Silence restores the slack. Catch-up: while more than `margin` + 5 ms is
+/// Queued when a frame arrives (after an underrun, or frames that came late
+/// Together), the frame is shortened by up to 10 % (20 % above 150 ms) with
 /// WSOLA until playback is back on schedule.
 final class Player {
     var lock = os_unfair_lock()
@@ -208,10 +213,10 @@ final class Player {
     var started = false
     var dry = false
     var underruns = 0
-    var compressed = 0  // samples removed by catch-up
+    var compressed = 0  // Samples removed by catch-up
     var dacStart: [Int: Double] = [:]
     var writtenAt: [Int: Double] = [:]
-    var recent: [(Int, Double)] = []  // last frames' (index, DAC start), for live display
+    var recent: [(Int, Double)] = []  // Last frames' (index, DAC start), for live display
 
     init(margin: Int, rate: Double) {
         self.margin = margin
@@ -292,8 +297,8 @@ final class Player {
 
 /// Streaming linear interpolation; identity when the rates match.
 struct Resampler {
-    let ratio: Double  // input samples per output sample
-    var position = 0.0  // next output position, in input samples from `last`
+    let ratio: Double  // Input samples per output sample
+    var position = 0.0  // Next output position, in input samples from `last`
     var last: Float = 0
 
     init(from input: Double, to output: Double) { ratio = input / output }
@@ -303,7 +308,7 @@ struct Resampler {
             out.append(contentsOf: x)
             return
         }
-        while position <= Double(x.count - 1) {  // samples indexed from -1 (`last`)
+        while position <= Double(x.count - 1) {  // Samples indexed from -1 (`last`)
             let i = Int(position.rounded(.down))
             let frac = Float(position - Double(i))
             let a = i < 0 ? last : x[i]
@@ -332,8 +337,8 @@ func median(_ v: [Double]) -> Double {
 }
 
 /// Microphone in and model audio out at 48 kHz, plus the reply latency on the
-/// audio clock: from the last sample of each user frame at the ADC to the
-/// first sample of the model frame answering it at the DAC.
+/// Audio clock: from the last sample of each user frame at the ADC to the
+/// First sample of the model frame answering it at the DAC.
 final class DuplexAudio {
     let input: Device
     let output: Device
@@ -358,10 +363,10 @@ final class DuplexAudio {
 
     // Measurements (audio and socket threads write, others read under the lock).
     private let statsLock = NSLock()
-    private var adcEnd: [Int: Double] = [:]      // user frame k: ADC time of its last sample
-    private var seen: [Int: Double] = [:]        // user frame k: when the input callback had it
-    private var received: [Int: Double] = [:]    // model frame j: when it arrived from the server
-    private var serverStep: [Int: Double] = [:]  // model frame j: step time the server sent
+    private var adcEnd: [Int: Double] = [:]      // User frame k: ADC time of its last sample
+    private var seen: [Int: Double] = [:]        // User frame k: when the input callback had it
+    private var received: [Int: Double] = [:]    // Model frame j: when it arrived from the server
+    private var serverStep: [Int: Double] = [:]  // Model frame j: step time the server sent
     private(set) var inputLevel: Float = 0
     private(set) var outputLevel: Float = 0
     /// Called on the audio threads with the 48 kHz input sent to the server
@@ -369,6 +374,9 @@ final class DuplexAudio {
     /// DAC time of its first sample). Set before start().
     var inputTap: ((UnsafeBufferPointer<Float>, Double) -> Void)?
     var outputTap: ((UnsafeBufferPointer<Float>, Double) -> Void)?
+    /// Muted: silence goes to the server (and the taps) in place of the microphone,
+    /// So the model keeps its clock.
+    var muted = false
 
     init(input: Device, output: Device, bufferMs: Double, marginMs: Double, frameSamples: Int,
          stepMs: Double, onAudio: @escaping (UnsafeBufferPointer<Float>) -> Void) {
@@ -383,8 +391,8 @@ final class DuplexAudio {
         inLatency = Double(deviceLatencyFrames(input.id, input: true)) / input.rate
         outLatency = Double(deviceLatencyFrames(output.id, input: false)) / output.rate
         // From a user frame's last sample at the ADC to the answering model frame
-        // at the DAC: input buffer, step, ~5 ms for the socket and encoding the
-        // frame's last chunk, output buffer and device, and the margin.
+        // At the DAC: input buffer, step, ~5 ms for the socket and encoding the
+        // Frame's last chunk, output buffer and device, and the margin.
         lead = bufferMs / 1000 + stepMs / 1000 + 0.005 + bufferMs / 1000 + outLatency + marginMs / 1000
         buffers = AudioBufferList.allocate(maximumBuffers: max(1, input.inputs))
         for i in 0..<max(1, input.inputs) {
@@ -401,7 +409,9 @@ final class DuplexAudio {
         free(buffers.unsafeMutablePointer)
     }
 
-    private static func makeUnit(device: AudioDeviceID, input: Bool) throws -> AudioUnit {
+    /// A HAL unit on one device: input only (bus 1) or output only (bus 0).
+    /// The voice recorder opens its device with it too.
+    static func makeUnit(device: AudioDeviceID, input: Bool) throws -> AudioUnit {
         var desc = AudioComponentDescription(
             componentType: kAudioUnitType_Output, componentSubType: kAudioUnitSubType_HALOutput,
             componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0)
@@ -419,7 +429,7 @@ final class DuplexAudio {
         return u
     }
 
-    private static func floatFormat(rate: Double, channels: Int) -> AudioStreamBasicDescription {
+    static func floatFormat(rate: Double, channels: Int) -> AudioStreamBasicDescription {
         AudioStreamBasicDescription(
             mSampleRate: rate, mFormatID: kAudioFormatLinearPCM,
             mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved,
@@ -435,7 +445,7 @@ final class DuplexAudio {
         inputBufferMs = Double(inFrames) / input.rate * 1000
         outputBufferMs = Double(outFrames) / output.rate * 1000
         // A frame can land just after an output cycle began: keep at least one
-        // output cycle (plus 5 ms) of slack, and plan with the real buffers.
+        // Output cycle (plus 5 ms) of slack, and plan with the real buffers.
         marginMs = max(marginMs, outputBufferMs + 5)
         os_unfair_lock_lock(&player.lock)
         player.margin = Int(marginMs / 1000 * rate)
@@ -458,7 +468,7 @@ final class DuplexAudio {
                "input callback")
 
         let outU = try Self.makeUnit(device: output.id, input: false)
-        var outFormat = Self.floatFormat(rate: rate, channels: 1)  // the unit converts to the device
+        var outFormat = Self.floatFormat(rate: rate, channels: 1)  // The unit converts to the device
         try ok(AudioUnitSetProperty(outU, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0,
                                     &outFormat, size), "output format")
         var outCallback = AURenderCallbackStruct(inputProc: { refCon, _, ts, _, frames, data in
@@ -498,9 +508,10 @@ final class DuplexAudio {
         }
         let mono = UnsafeBufferPointer(start: buffers[0].mData!.assumingMemoryBound(to: Float.self),
                                        count: Int(frames))
-        inputLevel = max(rms(mono), inputLevel * levelDecay(frames))
+        inputLevel = muted ? 0 : max(rms(mono), inputLevel * levelDecay(frames))
         resampled.removeAll(keepingCapacity: true)
         resampler.process(mono, into: &resampled)
+        if muted { resampled.withUnsafeMutableBufferPointer { $0.update(repeating: 0) } }
         let start = sent
         sent += resampled.count
         var k = start / frameSamples
@@ -532,7 +543,7 @@ final class DuplexAudio {
     }
 
     /// Peak-hold with a ~80 ms release, so readers sampling at screen rate see
-    /// speech rather than whichever 2 ms block came last.
+    /// Speech rather than whichever 2 ms block came last.
     private func levelDecay(_ frames: UInt32) -> Float {
         Float(exp(-Double(frames) / rate / 0.08))
     }
@@ -565,7 +576,7 @@ final class DuplexAudio {
     }
 
     /// Median reply latency over the last frames played, in seconds. Copies only
-    /// the player's short `recent` list, so the audio thread is not held up.
+    /// The player's short `recent` list, so the audio thread is not held up.
     func recentLatency() -> Double? {
         os_unfair_lock_lock(&player.lock)
         let recent = player.recent

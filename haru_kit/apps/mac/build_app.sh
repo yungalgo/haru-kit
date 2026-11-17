@@ -1,5 +1,6 @@
 #!/bin/bash
-# Build Haru.app and the command-line client with swiftc; Xcode is not needed.
+# Modified from higurashi-ai/Haru (Apache-2.0) for haru-kit.
+# Build Haru.app and (unless SKIP_CLI=1) the command-line client with swiftc; Xcode is not needed.
 #   PYTHON=/path/to/python ./build_app.sh   # default: ../.venv/bin/python
 # PYTHON is the interpreter that has haru_mlx installed; the app starts the
 # model server with it.
@@ -19,13 +20,19 @@ APP=build/Haru.app
 TARGET=(-target arm64-apple-macos13.0)
 FRAMEWORKS=(-framework AudioToolbox -framework CoreAudio)
 
-mkdir -p .build
-swiftc -O "${TARGET[@]}" Shared/*.swift CLI/main.swift -o .build/haru-client "${FRAMEWORKS[@]}"
+if [ "${SKIP_CLI:-0}" != "1" ]; then
+    mkdir -p .build
+    swiftc -O "${TARGET[@]}" Shared/*.swift CLI/main.swift -o .build/haru-client "${FRAMEWORKS[@]}"
+fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 swiftc -O "${TARGET[@]}" -parse-as-library Shared/*.swift App/*.swift -o "$APP/Contents/MacOS/Haru" \
     "${FRAMEWORKS[@]}" -framework SwiftUI -framework AppKit -framework AVFoundation -framework Accelerate -framework CoreMedia -framework CoreVideo
+
+PYTHON_XML="${PYTHON//&/&amp;}"
+PYTHON_XML="${PYTHON_XML//</&lt;}"
+PYTHON_XML="${PYTHON_XML//>/&gt;}"
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -37,17 +44,17 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundleLocalizations</key>
     <array><string>en</string><string>ja</string><string>zh-Hans</string><string>ko</string><string>es</string><string>fr</string><string>de</string><string>pt</string><string>ru</string></array>
     <key>CFBundleDisplayName</key><string>Haru</string>
-    <key>CFBundleIdentifier</key><string>ai.higurashi.haru</string>
+    <key>CFBundleIdentifier</key><string>io.github.yungalgo.haru-kit</string>
     <key>CFBundleExecutable</key><string>Haru</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Haru uses the microphone to pass your voice to the model.</string>
-    <key>HaruPython</key><string>$PYTHON</string>
+    <key>HaruPython</key><string>$PYTHON_XML</string>
 </dict>
 </plist>
 EOF
@@ -56,4 +63,4 @@ mkdir -p "$APP/Contents/Resources"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/"
 cp -R Resources/*.lproj "$APP/Contents/Resources/"
 codesign --force --sign - "$APP"
-echo "built $APP and .build/haru-client"
+echo "built $APP"

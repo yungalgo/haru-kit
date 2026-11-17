@@ -16,7 +16,7 @@ type WaveLanesProps = {
 const ORB = 92, LANE_HEIGHT = 112;
 
 // Layout of the video (720 units square): the name on
-// top, your lane and the model's (the transcript below is drawn by TextDisplay).
+// Top, your lane and the model's (the transcript below is drawn by TextDisplay).
 const VIDEO = { padding: 32, logo: 34, laneX: 158, laneWidth: 530, userY: 88, modelY: 214, end: 340 };
 
 // Peak of the newest `seconds` of what the analyser hears.
@@ -59,7 +59,7 @@ const prepare = (canvas: HTMLCanvasElement | null) => {
 };
 
 // Both lanes, drawn from one clock reading per screen frame so they line up:
-// your voice and the model's, newest at the right, each with a living orb on the left.
+// Your voice and the model's, newest at the right, each with a living orb on the left.
 export const WaveLanes: FC<WaveLanesProps> = ({ userAnalyser, modelAnalyser, userName, modelName, copyCanvasRef }) => {
   const orbs = [useRef<HTMLCanvasElement>(null), useRef<HTMLCanvasElement>(null)];
   const lanes = [useRef<HTMLCanvasElement>(null), useRef<HTMLCanvasElement>(null)];

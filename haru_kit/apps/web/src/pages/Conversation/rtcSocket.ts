@@ -2,20 +2,20 @@
 //
 // Audio goes over the peer connection (microphone track up, model track down: Opus over
 // UDP, so a late or lost packet is concealed instead of stalling the stream); model text
-// and session events come over the "events" DataChannel and are re-emitted as the same
-// binary protocol messages the WebSocket carries (0x00 handshake, 0x02 text, 0x06 ping),
-// so useSocket / useServerText work unchanged. Audio "messages" sent by the Opus recorder
-// are dropped: the microphone track already carries that audio.
+// And session events come over the "events" DataChannel and are re-emitted as the same
+// Binary protocol messages the WebSocket carries (0x00 handshake, 0x02 text, 0x06 ping),
+// So useSocket / useServerText work unchanged. Audio "messages" sent by the Opus recorder
+// Are dropped: the microphone track already carries that audio.
 //
 // If WebRTC cannot connect (no UDP path, no TURN, server without WebRTC), it falls back
-// to the /api/chat WebSocket transparently: the server is told to free the slot, and
-// from then on messages and the recorder's Opus pages go through that WebSocket.
+// To the /api/chat WebSocket transparently: the server is told to free the slot, and
+// From then on messages and the recorder's Opus pages go through that WebSocket.
 
 import { fetchTurnServers, loadTurnKey } from "./turnKey";
 
 const CONNECT_TIMEOUT_MS = 10000;
 // Pre-negotiated "events" DataChannel (both peers create it with this id; sent to the
-// server as ``dcid``): no in-band open handshake, so events flow one round trip sooner.
+// Server as ``dcid``): no in-band open handshake, so events flow one round trip sooner.
 const EVENTS_CHANNEL_ID = 4;
 
 export type RtcAudioStats = {
@@ -24,10 +24,10 @@ export type RtcAudioStats = {
   jitterBufferSeconds: number;
   packetsLost: number;
   // Same quantity the WebSocket path shows (mic time minus the stream time being played):
-  // the server measures user stream time arrived minus model stream time sent; the
-  // network round trip, this browser's jitter buffer and the audio devices (microphone
-  // input latency, playout path after the jitter buffer) are added here. 0 until the
-  // server has reported (the model has produced audio).
+  // The server measures user stream time arrived minus model stream time sent; the
+  // Network round trip, this browser's jitter buffer and the audio devices (microphone
+  // Input latency, playout path after the jitter buffer) are added here. 0 until the
+  // Server has reported (the model has produced audio).
   latencySeconds: number;
   captureSeconds: number;
   playoutDeviceSeconds: number;
@@ -35,7 +35,7 @@ export type RtcAudioStats = {
   serverLagSeconds: number;
   relayProtocol: string;  // TURN leg: udp / tcp / tls ("" when not relayed)
   // NetEq time stretching (seconds of 48 kHz audio): removed by speeding up playout,
-  // inserted by slowing it down; concealedSeconds above covers losses/late packets.
+  // Inserted by slowing it down; concealedSeconds above covers losses/late packets.
   acceleratedSeconds: number;
   deceleratedSeconds: number;
 };
@@ -50,6 +50,7 @@ export class RtcSocket extends EventTarget {
   private pc: RTCPeerConnection | null = null;
   private channel: RTCDataChannel | null = null;
   private mic: MediaStream | null = null;
+  private muted = false;
   private pingTimer: number | undefined;
   private connectTimer: number | undefined;
   private closedOnce = false;
@@ -131,14 +132,15 @@ export class RtcSocket extends EventTarget {
     const pc = new RTCPeerConnection({ iceServers });
     this.pc = pc;
     this.mic = await navigator.mediaDevices.getUserMedia(this.constraints);
+    this.setMuted(this.muted);
     this.mic.getAudioTracks().forEach(track => pc.addTrack(track, this.mic!));
     pc.ontrack = event => {
       // The server already paces and buffers the model audio: keep the browser's own playout
-      // buffer at its minimum instead of stacking a second one on top.
+      // Buffer at its minimum instead of stacking a second one on top.
       try {
         (event.receiver as any).jitterBufferTarget = 0;
       } catch {
-        // older browsers
+        // Older browsers
       }
       this.remoteStream = event.streams[0] ?? new MediaStream([event.track]);
       this.dispatchEvent(new Event("remotestream"));
@@ -208,15 +210,21 @@ export class RtcSocket extends EventTarget {
     }, CONNECT_TIMEOUT_MS);
   }
 
+  // Muted: the track sends silence, so the model's clock keeps running.
+  setMuted(muted: boolean) {
+    this.muted = muted;
+    this.mic?.getAudioTracks().forEach(track => track.enabled = !muted);
+  }
+
   // The Opus recorder keeps running for the visualizer/recording; over WebRTC its pages are
-  // not needed, after a fallback they are the user's audio.
+  // Not needed, after a fallback they are the user's audio.
   send(data: ArrayBufferLike | ArrayBufferView | Blob | string) {
     if (this.fallbackWs?.readyState === WebSocket.OPEN) {
       this.fallbackWs.send(data);
     }
   }
 
-  // fallbackPlayoutSeconds: the output device latency to use when the browser has no
+  // FallbackPlayoutSeconds: the output device latency to use when the browser has no
   // "media-playout" stats (AudioContext.outputLatency).
   async getAudioStats(fallbackPlayoutSeconds = 0): Promise<RtcAudioStats | null> {
     if (!this.pc || this.fallbackWs) return null;
@@ -285,7 +293,7 @@ export class RtcSocket extends EventTarget {
         this.channel.send(JSON.stringify({ type: "session.end" }));
       }
     } catch {
-      // ignore
+      // Ignore
     }
     setTimeout(() => this.pc?.close(), 300);
     this.mic?.getTracks().forEach(track => track.stop());

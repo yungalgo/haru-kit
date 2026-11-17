@@ -1,12 +1,13 @@
+// Modified from higurashi-ai/Haru (Apache-2.0) for haru-kit.
 // Unix-socket protocol of the model server
 // (python -m haru_mlx.native): a type byte, a
-// little-endian u32 payload length, then the payload.
+// Little-endian u32 payload length, then the payload.
 
 import Darwin
 import Foundation
 
 /// The model server's socket in this user's temporary directory ($TMPDIR), as
-/// the Python server defaults to.
+/// The Python server defaults to.
 let defaultSocket = (NSTemporaryDirectory() as NSString).appendingPathComponent("haru.sock")
 
 enum Message: UInt8 {
@@ -32,14 +33,14 @@ final class Connection {
                 connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        if status != 0 { return nil }  // deinit closes the fd
+        if status != 0 { return nil }  // Deinit closes the fd
         var one: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
     }
 
     /// Wake any reader with EOF. The fd itself is closed in deinit, once no
-    /// thread can still read it: closing it here would let the next connection
-    /// reuse the number while a reader of this one is between reads.
+    /// Thread can still read it: closing it here would let the next connection
+    /// Reuse the number while a reader of this one is between reads.
     func close() {
         shutdown(fd, SHUT_RDWR)
     }
@@ -63,7 +64,7 @@ final class Connection {
     func readMessage() -> (UInt8, [UInt8])? {
         guard let header = readExactly(5) else { return nil }
         let length = header[1...4].enumerated().reduce(0) { $0 | Int($1.element) << (8 * $1.offset) }
-        guard let payload = readExactly(length) else { return nil }
+        guard length >= 0, length <= 32 * 1024 * 1024, let payload = readExactly(length) else { return nil }
         return (header[0], payload)
     }
 

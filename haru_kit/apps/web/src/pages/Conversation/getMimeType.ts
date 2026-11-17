@@ -1,5 +1,5 @@
-// mp4 with H.264 video first (plays on iPhone, social media, slides) and Opus
-// audio, the better codec at the same bitrate; AAC where the browser has no
+// Mp4 with H.264 video first (plays on iPhone, social media, slides) and Opus
+// Audio, the better codec at the same bitrate; AAC where the browser has no
 // Opus-in-mp4 (Safari); webm (VP8/VP9 + Opus) where it cannot record mp4 at all.
 const VIDEO_MIME_TYPES = [
   "video/mp4;codecs=avc1,opus",
@@ -34,12 +34,4 @@ export const getMimeType = (type: "audio" | "video") => {
   return getVideoMimeType();
 }
 
-export const getExtension = (type: "audio" | "video") => {
-  if(getMimeType(type).includes("mp4")) {
-    return type === "audio" ? "m4a" : "mp4";
-  }
-  if(getMimeType(type).includes("mpeg")) {
-    return "mp3";
-  }
-  return "webm";
-}
+export const getVideoExtension = () => getVideoMimeType().includes("mp4") ? "mp4" : "webm";
