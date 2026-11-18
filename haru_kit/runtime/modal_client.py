@@ -97,16 +97,19 @@ def ended(call) -> str | None:
         return str(error)[:300]
 
 
-def start(links, key: str) -> int:
+def start(links, key: str, function_name: str = "haru", options: dict | None = None) -> int:
     if not key:
         emit(event="error", what="Missing access key.", why="Start Haru with `haru-kit start --on modal`.")
         return 1
     stop(links)  # never two GPUs at once
     link = secrets.token_hex(8)
-    function = modal.Function.from_name(APP_NAME, "haru")
+    function = modal.Function.from_name(APP_NAME, function_name)
     since = datetime.now(UTC) - timedelta(seconds=5)
-    call = function.spawn(key=key, link=link)
-    links[CURRENT] = {"call": call.object_id, "link": link}
+    if function_name == "haru":
+        call = function.spawn(key=key, link=link)
+    else:
+        call = function.spawn(key=key, link=link, options=options or {})
+    links[CURRENT] = {"call": call.object_id, "link": link, "function": function_name}
     gpu_found = threading.Event()
     threading.Thread(target=follow_system_logs, args=(function, since, gpu_found), daemon=True).start()
 
@@ -142,6 +145,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("start", "stop", "status"))
     parser.add_argument("--key", default=os.environ.get("HARU_KIT_KEY"), help="default: $HARU_KIT_KEY")
+    parser.add_argument("--function", default="haru", choices=("haru", "serve_gateway"))
     args = parser.parse_args()
     links = modal.Dict.from_name(LINKS_NAME, create_if_missing=True)
 
@@ -152,11 +156,13 @@ def main() -> int:
 
     if args.command == "status":
         link = running(links)
-        emit(running=bool(link), url=link.get("url"), region=link.get("region"),
+        emit(running=bool(link), url=link.get("url"), region=link.get("region"), mode=link.get("mode", "web"),
              last_stop=None if link else links.get(LAST_STOP))
         return 0
 
-    return start(links, args.key)
+    raw_opts = os.environ.get("HARU_KIT_OPTIONS", "")
+    opts = json.loads(raw_opts) if raw_opts else None
+    return start(links, args.key, function_name=args.function, options=opts)
 
 
 if __name__ == "__main__":

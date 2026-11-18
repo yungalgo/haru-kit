@@ -1,5 +1,6 @@
 include CHANGELOG.md
 include SKILL.md
+graft examples
 graft scripts
 graft tests/data
 graft haru_kit/apps/strings

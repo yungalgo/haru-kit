@@ -74,9 +74,9 @@ def choose_region(setting: str) -> str:
     return region_from_time_zone(local_time_zone(), time.localtime().tm_gmtoff / 3600)
 
 
-def price(region: str) -> float:
+def price(region: str, gpu_type: str = GPU) -> float:
     factor = 1.0 if not region else (1.75 if "-" in region else 1.15)
-    return round(PRICE[GPU] * factor + 1e-9, 2)  # 1.265 -> 1.27
+    return round(PRICE.get(gpu_type, PRICE[GPU]) * factor + 1e-9, 2)  # 1.265 -> 1.27
 
 
 def region_text(region: str, setting: str) -> str:
@@ -127,13 +127,13 @@ def wait_action(waited: float, asked_at: float, ask: bool) -> str | None:
     return "timeout" if waited >= WAIT_LIMIT else None
 
 
-def _deploy(region: str, log, verbose: bool) -> None:
+def _deploy(region: str, log, verbose: bool, *, gpu_type: str = GPU) -> None:
     text = "Send Haru to Modal" if region else "Send Haru to Modal (any region)"
     started = time.monotonic()
     with ui.Step(text) as step:
         try:
             run_logged(_modal(["deploy", str(paths.runtime_script("modal_app.py"))]), log, step.update, verbose,
-                       {"HARU_KIT_GPU": GPU, "HARU_KIT_REGION": region})
+                       {"HARU_KIT_GPU": gpu_type, "HARU_KIT_REGION": region})
         except CommandError as error:
             raise Failure("The Modal deploy failed.", "\n".join(error.tail[-8:]),
                           f"Full log: {log}\nCheck your Modal account, then run haru-kit start --on modal again.") \
@@ -234,25 +234,46 @@ def _load(client: Runtime) -> str:
     return url
 
 
-def run(facts: Facts, settings: Settings, verbose: bool, ask: bool) -> None:
-    """ask: False with --yes; then (as without a terminal) wait for a GPU up to WAIT_LIMIT and ask nothing."""
+def start_tunnel(
+    facts: Facts,
+    settings: Settings,
+    verbose: bool,
+    ask: bool,
+    *,
+    function: str = "haru",
+    key: str | None = None,
+    options: dict | None = None,
+    gpu_override: str | None = None,
+    retry_cmd: str = "haru-kit start --on modal",
+) -> tuple[str, str, str, str] | None:
+    """Deploy and start a Modal GPU container; returns ``(url, key, where, region)`` or ``None`` if cancelled."""
     steps.install_env("modal", facts, verbose)
     login(facts)
     region, setting = choose_region(settings.modal_region), settings.modal_region
     ask = ask and ui.interactive()
-    key = secrets.token_urlsafe(24)
+    key = key or secrets.token_urlsafe(24)
+    gpu_type = gpu_override or GPU
     log = paths.log_file("modal")
-    _deploy(region, log, verbose)
+    _deploy(region, log, verbose, gpu_type=gpu_type)
     while True:
-        # The access key goes by environment: command lines are written to the log.
-        client = Runtime(paths.env_python("modal"), paths.runtime_script("modal_client.py"), ["start"], log,
-                         verbose, env={"HARU_KIT_KEY": key})
+        # Secrets go by environment: command lines are written to the log.
+        env = {"HARU_KIT_KEY": key}
+        if options:
+            env["HARU_KIT_OPTIONS"] = json.dumps(options)
+        client = Runtime(
+            paths.env_python("modal"),
+            paths.runtime_script("modal_client.py"),
+            ["start", "--function", function],
+            log,
+            verbose,
+            env=env,
+        )
         try:
             outcome = _get_gpu(client, region, setting, ask)
             if outcome == "any":
                 _stop_call(client)
                 region, setting = "", "any"
-                _deploy(region, log, verbose)  # the region is fixed at deploy
+                _deploy(region, log, verbose, gpu_type=gpu_type)  # the region is fixed at deploy
                 continue
             if outcome == "stop":
                 if _stop_call(client):
@@ -260,11 +281,11 @@ def run(facts: Facts, settings: Settings, verbose: bool, ask: bool) -> None:
                 else:
                     ui.error("Stopped locally, and could not confirm Modal stopped.",
                              "Check https://modal.com/apps or run: haru-kit stop")
-                ui.console.print("    Try again: haru-kit start --on modal")
+                ui.console.print(f"    Try again: {retry_cmd}")
                 if region:
-                    ui.console.print("    Or in any region: haru-kit start --on modal --region any")
+                    ui.console.print(f"    Or in any region: {retry_cmd} --region any")
                 ui.console.print()
-                return
+                return None
             where = outcome.removeprefix("gpu:")
             url = _load(client)
         except BaseException:
@@ -275,9 +296,17 @@ def run(facts: Facts, settings: Settings, verbose: bool, ask: bool) -> None:
                          "Run `haru-kit stop` or check https://modal.com/apps.")
             raise
         client.stop()
-        open_by = time.strftime("%H:%M", time.localtime(time.time() + FIRST_IDLE_MINUTES * 60))
-        ui.ready_modal(f"{url}/?key={key}", GPU, price(region), where, open_by, IDLE_MINUTES)
+        return url, key, where, region
+
+
+def run(facts: Facts, settings: Settings, verbose: bool, ask: bool) -> None:
+    """ask: False with --yes; then (as without a terminal) wait for a GPU up to WAIT_LIMIT and ask nothing."""
+    started = start_tunnel(facts, settings, verbose, ask, function="haru")
+    if started is None:
         return
+    url, key, where, region = started
+    open_by = time.strftime("%H:%M", time.localtime(time.time() + FIRST_IDLE_MINUTES * 60))
+    ui.ready_modal(f"{url}/?key={key}", GPU, price(region), where, open_by, IDLE_MINUTES)
 
 
 def stopped_text(last_stop: dict) -> str:

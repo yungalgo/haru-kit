@@ -38,6 +38,62 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", parents=[common], help="what is installed and running, folders, sizes")
     sub.add_parser("doctor", parents=[common], help="check this computer and each way")
     sub.add_parser("uninstall", parents=[common], help="remove what haru-kit installed")
+
+    serve = sub.add_parser("serve", parents=[common], help="start the /v1/realtime WebSocket API server")
+    serve.add_argument("--on", choices=ways.WAYS, help="where the API server runs (mac, nvidia, or modal)")
+    serve.add_argument("--host", default="127.0.0.1", help="local bind address (default 127.0.0.1)")
+    serve.add_argument("--port", type=int, default=None, help="local port (default 8000)")
+    serve.add_argument("--api-key", "--key", dest="api_key", help="Bearer API key (Modal generates one by default)")
+    serve.add_argument("--quantize", choices=("8", "none"), help="Mac: 8-bit weights (default) or none")
+    serve.add_argument("--region", choices=("auto", "any", "us", "eu", "ap"), help="Modal: GPU region")
+    serve.add_argument("--gpu", choices=("A10", "L40S", "L4", "a10", "l40s", "l4"), help="Modal: GPU type")
+    serve.add_argument("--max-calls", type=int, default=None,
+                       help="maximum concurrent calls (Modal default 2, local 1)")
+
+    check = sub.add_parser("check", parents=[common], help="run a real-time health check against an API server URL")
+    check.add_argument("url", help="server URL (e.g. ws://127.0.0.1:8000 or wss://...modal.host)")
+    check.add_argument("--api-key", "--key", dest="api_key", help="Bearer API key (or set $HARU_API_KEY)")
+    check.add_argument("--card", help="character ID, .character.json, .txt, or card text (default: haru)")
+    check.add_argument("--voice", help="voice ID or audio file path")
+    check.add_argument("--lang", default="en", help="card and voice language (default: en)")
+    check.add_argument("--seconds", type=float, default=2.4, help="caller audio duration in seconds (default 2.4)")
+
+    def _add_phone_opts(target: argparse.ArgumentParser, *, sup: bool = False) -> None:
+        d_none = argparse.SUPPRESS if sup else None
+        d_false = argparse.SUPPRESS if sup else False
+        prov = target.add_mutually_exclusive_group()
+        prov.add_argument("--twilio", action="store_true", default=d_false, help="use Twilio")
+        prov.add_argument("--telnyx", action="store_true", default=d_false, help="use Telnyx")
+        target.add_argument("--character", default=argparse.SUPPRESS if sup else "haru",
+                            help="character ID (default: haru)")
+        target.add_argument("--card", default=d_none, help="card file or text override")
+        target.add_argument("--voice", default=d_none, help="voice ID or audio file override")
+        target.add_argument("--lang", default=argparse.SUPPRESS if sup else "en", help="language code (default: en)")
+        target.add_argument("--preroll", default=d_none, help="audio file played before Haru joins")
+        target.add_argument("--region", choices=("auto", "any", "us", "eu", "ap"), default=d_none,
+                            help="Modal GPU region")
+        target.add_argument("--gpu", choices=("A10", "L40S", "L4", "a10", "l40s", "l4"), default=d_none,
+                            help="Modal GPU")
+        target.add_argument("--max-calls", type=int, default=d_none, help="maximum concurrent calls (default 2)")
+        target.add_argument("--redeploy", action="store_true", default=d_false, help="force fresh Modal gateway deploy")
+
+    phone_sub_common = argparse.ArgumentParser(add_help=False)
+    phone_sub_common.add_argument("--yes", "-y", action="store_true", default=argparse.SUPPRESS, help="ask nothing")
+    phone_sub_common.add_argument("--verbose", "-v", action="store_true", default=argparse.SUPPRESS, help="show logs")
+
+    phone = sub.add_parser("phone", parents=[common], help="connect a Twilio or Telnyx phone number to Haru")
+    _add_phone_opts(phone, sup=False)
+    phone.add_argument("--number", help="phone number in E.164 format (e.g. +14155550100)")
+    phone.add_argument("--buy", action="store_true", help="buy a new phone number in your account")
+    phone.add_argument("--area-code", help="area code when buying a number (e.g. 415)")
+    phone.add_argument("--speak-first", action="store_true", help="have Haru speak first on inbound calls")
+
+    phone_sub = phone.add_subparsers(dest="phone_action")
+    p_call = phone_sub.add_parser("call", parents=[phone_sub_common], help="place an outbound call to a phone number")
+    _add_phone_opts(p_call, sup=True)
+    p_call.add_argument("to_number", help="destination number in E.164 format (e.g. +14155550199)")
+    p_call.add_argument("--from", dest="from_number", default=None, help="caller ID number on your account")
+    phone_sub.add_parser("stop", parents=[phone_sub_common], help="stop the Modal GPU and restore your phone number")
     return parser
 
 
@@ -178,6 +234,12 @@ def status_cmd(_args) -> int:
         from . import modal
 
         ui.console.print(f"  Modal: {modal.running_text()}")
+    if (paths.home_dir() / "phone_state.json").is_file():
+        from . import phone
+
+        phone_line = phone.running_text()
+        if phone_line:
+            ui.console.print(f"  Phone: {phone_line}")
     ui.console.print()
     return 0
 
@@ -248,8 +310,9 @@ def _reachable(url: str) -> bool:
 
 
 def stop_cmd(args) -> int:
-    from . import modal
+    from . import modal, phone
 
+    phone.restore_saved_number(quiet=False)
     try:
         modal.stop()
     except Failure as error:
@@ -322,6 +385,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "start":
             settings = Settings.load()
             return guide(args, settings, repeat=settings.way is not None)
+        if args.command == "serve":
+            from . import serve
+
+            return serve.serve_cmd(args)
+        if args.command == "check":
+            from . import serve
+
+            return serve.check_cmd(args)
+        if args.command == "phone":
+            from . import phone
+
+            return phone.phone_cmd(args)
         return {"stop": stop_cmd, "status": status_cmd, "doctor": doctor_cmd, "uninstall": uninstall_cmd}[
             args.command](args)
     except KeyboardInterrupt:

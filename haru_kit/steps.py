@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import signal
 import time
 
 from . import envs, model, paths, ui
@@ -52,9 +53,15 @@ def download_model(way: str, verbose: bool) -> None:
     ui.done(text, ui.gb(model.size_gb()))
 
 
-def start_server(way: str, args: list[str], verbose: bool) -> tuple[Runtime, str]:
-    """Start runtime/web_server.py in the way's env; wait for "ready". Returns the runtime and the URL."""
-    runtime = Runtime(paths.env_python(way), paths.runtime_script("web_server.py"), args, paths.log_file(way), verbose)
+def start_server(
+    way: str,
+    args: list[str],
+    verbose: bool,
+    *,
+    script: str = "web_server.py",
+) -> tuple[Runtime, str]:
+    """Start a runtime server script in the way's env; wait for "ready". Returns the runtime and the URL."""
+    runtime = Runtime(paths.env_python(way), paths.runtime_script(script), args, paths.log_file(way), verbose)
     started = time.monotonic()
     try:
         with ui.Step("Load the model") as step:
@@ -76,7 +83,13 @@ def start_server(way: str, args: list[str], verbose: bool) -> tuple[Runtime, str
 
 
 def wait_until_stopped(runtime: Runtime) -> None:
-    """Block until Ctrl+C or the server ends; then stop it cleanly."""
+    """Block until Ctrl+C / SIGTERM or the server ends; then stop it cleanly."""
+    prev_term = signal.getsignal(signal.SIGTERM)
+
+    def _on_term(_signum, _frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _on_term)
     try:
         for event in runtime.events():
             if event.get("event") == "error":
@@ -85,5 +98,6 @@ def wait_until_stopped(runtime: Runtime) -> None:
     except KeyboardInterrupt:
         ui.console.print("\n  Stopping Haru…")
     finally:
+        signal.signal(signal.SIGTERM, prev_term)
         runtime.stop()
     ui.done("Haru stopped.")
