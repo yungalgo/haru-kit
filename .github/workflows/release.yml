@@ -1,0 +1,92 @@
+name: release
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv --python 3.12
+      - run: uv pip install -e ".[dev]"
+      - name: Check tag matches haru_kit.__version__
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION=$(uv run --no-sync python -c "import haru_kit; print(f'v{haru_kit.__version__}')")
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "Tag $TAG does not match haru_kit.__version__ ($VERSION)" >&2
+            exit 1
+          fi
+      - run: uv run --no-sync ruff check haru_kit tests scripts
+      - run: uv run --no-sync python scripts/gen_strings.py --check
+      - run: uv run --no-sync pytest -q
+      - run: uv build
+      - name: Verify wheel contents and clean tool install
+        run: |
+          python3 - <<'EOF'
+          import glob, zipfile
+          wheels = glob.glob("dist/*.whl")
+          assert len(wheels) == 1, wheels
+          with zipfile.ZipFile(wheels[0]) as zf:
+              names = set(zf.namelist())
+          for required in ("haru_kit/runtime/web_server.py", "haru_kit/static/index.html", "haru_kit/apps/mac/build_app.sh"):
+              assert required in names, f"missing {required}"
+          bad = [n for n in names if "/build/" in n or "/.build/" in n or "/Tests/" in n or "node_modules" in n]
+          assert not bad, f"unexpected files in wheel: {bad}"
+          EOF
+          UV_TOOL_DIR=/tmp/uv-tools UV_TOOL_BIN_DIR=/tmp/uv-bin uv tool install dist/*.whl
+          /tmp/uv-bin/haru-kit --version
+          /tmp/uv-bin/haru-kit doctor
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  publish-pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    needs: [build, publish-pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Extract release notes and publish GitHub Release
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          python3 - "$VERSION" <<'EOF' > /tmp/notes.md
+          import re, sys
+          from pathlib import Path
+          version = re.escape(sys.argv[1])
+          text = Path("CHANGELOG.md").read_text(encoding="utf-8") if Path("CHANGELOG.md").is_file() else ""
+          match = re.search(rf"^## {version}\b[^\n]*\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+          print(match.group(1).strip() if match else "")
+          EOF
+          if [ -s /tmp/notes.md ]; then
+            gh release create "$GITHUB_REF_NAME" dist/* --title "haru-kit $GITHUB_REF_NAME" --notes-file /tmp/notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --title "haru-kit $GITHUB_REF_NAME" --generate-notes
+          fi
