@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "id": "test-voice",
+  "name": "Test Voice",
+  "language": "ja",
+  "gender": "female",
+  "seconds": 5.4,
+  "text": "Synthetic test tone with leading and trailing silence.",
+  "source": "Generated synthetic tone (CC0)"
+}

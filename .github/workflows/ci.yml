@@ -1,0 +1,38 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: macos-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv venv --python ${{ matrix.python }}
+      - run: uv pip install -e ".[dev]"
+      - name: Install Pipecat & LiveKit extras for SDK integration tests
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        run: uv pip install -e ".[pipecat,livekit]" fastapi httpx
+      - run: uv run --no-sync ruff check haru_kit tests scripts examples
+      - run: uv run --no-sync python scripts/gen_strings.py --check
+      - name: Web app type check, bundle check, and Mac Swift tests
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew install ffmpeg
+          cd haru_kit/apps/web && npm ci --silent && npx tsc --noEmit && cd ../../..
+          ./scripts/build-web.sh
+          git diff --exit-code haru_kit/static
+          ./haru_kit/apps/mac/Tests/run.sh
+      - run: uv run --no-sync pytest -q
